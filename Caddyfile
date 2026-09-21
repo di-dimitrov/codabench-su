@@ -1,61 +1,85 @@
-{$DOMAIN_NAME} {
-  # HTTPS Options
-  tls {$TLS_EMAIL}
+# =============================================================================
+# Codabench Caddyfile — behind the departmental Apache proxy
+#
+# Changes from upstream:
+#   1. Site address is :80 instead of {$DOMAIN_NAME}. Caddy answers on port 80
+#      for any Host header, so it does not care what name the proxy forwards.
+#   2. The `tls {$TLS_EMAIL}` line is REMOVED. TLS terminates at the
+#      departmental Apache; Caddy must not try to obtain a certificate,
+#      because the ACME HTTP challenge cannot reach this private VM.
+#   3. Added the @min_bucket block so /public* and /private* reach MinIO.
+#      Required because AWS_S3_ENDPOINT_URL points at the public domain on 443.
+#   4. Added `header_up X-Forwarded-Proto https` so Django knows the original
+#      request was HTTPS, regardless of what the upstream Apache sets.
+#
+# Everything else — maintenance mode, Server header stripping, gzip, static
+# file serving, logging — is upstream, unmodified.
+#
+# Install to /opt/codabench/Caddyfile
+# =============================================================================
 
-  # Test HTTPS setup
-  # tls {$TLS_EMAIL} {
-  #   ca https://acme-staging-v02.api.letsencrypt.org/directory
-  # }
+:80 {
 
+        # Removing some headers for improved security:
+        header -Server
 
-  # Removing some headers for improved security:
-  header -Server
+        @noRedirect {
+                not path /maintenance.html
+                not path /offline.png
+        }
 
-  @noRedirect {
-    not path /maintenance.html
-    not path /offline.png
-  }
-  @maintenanceModeActive file {
-    root /srv
-    try_files maintenance.on
-  }
-  handle @maintenanceModeActive {
-    root * /srv
-    redir @noRedirect /maintenance.html
-    file_server {
-      status 503
-    }
-  }
-  # When maintenance ends, redirect stale /maintenance.html requests back to home
-  @staleMaintenancePage {
-    path /maintenance.html
-    not file {
-      root /srv
-      try_files maintenance.on
-    }
-  }
-  redir @staleMaintenancePage / 302
+        @maintenanceModeActive file {
+                root /srv
+                try_files maintenance.on
+        }
 
-  # Serves static files, should be the same as `STATIC_ROOT` setting:
-  root * /var/www/django
-  file_server
+        handle @maintenanceModeActive {
+                root * /srv
+                redir @noRedirect /maintenance.html
+                file_server {
+                        status 503
+                }
+        }
 
-  @noStatic {
-    not path /static/*
-    not path /media/*
-  }
+        # When maintenance ends, redirect stale /maintenance.html requests back to home
+        @staleMaintenancePage {
+                path /maintenance.html
+                not file {
+                        root /srv
+                        try_files maintenance.on
+                }
+        }
+        redir @staleMaintenancePage / 302
 
+        # Serves static files, should be the same as `STATIC_ROOT` setting:
+        root * /var/www/django
+        file_server
 
-  # Serving dynamic requests:
-  reverse_proxy @noStatic django:8000
+        # Dynamic requests to Django. Excludes static, media, and the two
+        # MinIO bucket paths.
+        @dynamic {
+                not path /static/* /media/* /{$AWS_STORAGE_BUCKET_NAME}* /{$AWS_STORAGE_PRIVATE_BUCKET_NAME}* /minio*
+        }
+        reverse_proxy @dynamic django:8000 {
+                header_up X-Forwarded-Proto https
+        }
 
-  # Allows to use `.gz` files when available:
-  encode gzip
+        # MinIO buckets, served on the same domain. The S3 signature algorithm
+        # does not support a path prefix like /s3/, so the bucket names must sit
+        # at the domain root. Caddy preserves the Host header by default, which
+        # MinIO requires for signature validation.
+        @min_bucket {
+                path /{$AWS_STORAGE_BUCKET_NAME}* /{$AWS_STORAGE_PRIVATE_BUCKET_NAME}*
+        }
+        reverse_proxy @min_bucket minio:{$MINIO_PORT}
 
-  # Logs, will keep 5 GB
-  log {
-    output file /var/log/caddyaccess.log {
-      roll_size 5000MiB
-    }
-  }
+        # Allows to use `.gz` files when available:
+        encode gzip
+
+        # Logs, will keep 5 GB
+        log {
+                output file /var/log/caddyaccess.log {
+                        roll_size 5000MiB
+                }
+        }
 }

@@ -9,6 +9,10 @@ class SignUpForm(UserCreationForm):
     email = forms.EmailField(
         max_length=254, help_text="Required. Inform a valid email address."
     )
+    first_name = forms.CharField(max_length=150, required=True)
+    last_name = forms.CharField(max_length=150, required=True)
+    team_name = forms.CharField(max_length=100, required=True, label="Team name")
+    affiliation = forms.CharField(max_length=200, required=True, label="Affiliation")
 
     def clean_username(self):
         data = self.cleaned_data["username"]
