@@ -56,7 +56,7 @@ services:
   # Minio local storage helper
   #----------------------------------------------------------------------------------------------------
   minio:
-    image: codalab/minio:RELEASE.2025-04-22T22-12-26Z
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
     command: server /export
     volumes:
       - ./var/minio:/export
@@ -67,44 +67,71 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-I", "http://minio:9000/minio/health/live"]
       interval: 5s
+      timeout: 5s
       retries: 5
   createbuckets:
-    image: codalab/mc:RELEASE.2025-07-21T05-28-08Z
+    image: quay.io/minio/mc:RELEASE.2025-07-21T05-28-08Z
     depends_on:
       minio:
         condition: service_healthy
-    env_file: .env
-    # volumes:
-    #   This volume is shared with `minio`, so `z` to share it
-    #   - ./var/minio:/export
-    entrypoint: >
-      /bin/sh -c "
-      set -x;
-      if [ -n \"$MINIO_ACCESS_KEY\" ] && [ -n \"$MINIO_SECRET_KEY\" ] && [ -n \"$MINIO_PORT\" ]; then
-        until /usr/bin/mc alias set minio_docker http://minio:$MINIO_PORT $MINIO_ACCESS_KEY $MINIO_SECRET_KEY && break; do
-          echo '...waiting...' && sleep 5;
-        done;
-        /usr/bin/mc mb minio_docker/$AWS_STORAGE_BUCKET_NAME || echo 'Bucket $AWS_STORAGE_BUCKET_NAME already exists.';
-        /usr/bin/mc mb minio_docker/$AWS_STORAGE_PRIVATE_BUCKET_NAME || echo 'Bucket $AWS_STORAGE_PRIVATE_BUCKET_NAME already exists.';
-        /usr/bin/mc anonymous set download minio_docker/$AWS_STORAGE_BUCKET_NAME;
-      else
-        echo 'MINIO_ACCESS_KEY, MINIO_SECRET_KEY, or MINIO_PORT are not defined. Skipping buckets creation.';
-      fi;
-      exit 0;
-      "
+
+    env_file:
+      - .env
+
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -x
+
+        if [ -n "$$MINIO_ACCESS_KEY" ] && \
+           [ -n "$$MINIO_SECRET_KEY" ] && \
+           [ -n "$$MINIO_PORT" ]; then
+
+          until /usr/bin/mc alias set \
+            minio_docker \
+            http://minio:9000 \
+            "$$MINIO_ACCESS_KEY" \
+            "$$MINIO_SECRET_KEY"
+          do
+            echo "...waiting..."
+            sleep 5
+          done
+
+          /usr/bin/mc mb \
+            "minio_docker/$$AWS_STORAGE_BUCKET_NAME" ||
+            echo "Bucket $$AWS_STORAGE_BUCKET_NAME already exists."
+
+          /usr/bin/mc mb \
+            "minio_docker/$$AWS_STORAGE_PRIVATE_BUCKET_NAME" ||
+            echo "Bucket $$AWS_STORAGE_PRIVATE_BUCKET_NAME already exists."
+
+          /usr/bin/mc anonymous set download \
+            "minio_docker/$$AWS_STORAGE_BUCKET_NAME"
+        else
+          echo "MINIO_ACCESS_KEY, MINIO_SECRET_KEY, or MINIO_PORT are not defined. Skipping buckets creation."
+        fi
+
+        exit 0
+
 
   #----------------------------------------------------------------------------------------------------
   #   Local development helper, rebuilds RiotJS/Stylus on change
   #----------------------------------------------------------------------------------------------------
   builder:
     container_name: builder
+
     build:
       context: .
       dockerfile: packaging/container/Containerfile.builder
+
     volumes:
       - .:/app:delegated
+
     restart: unless-stopped
+
     logging:
+      driver: json-file
       options:
         max-size: "20m"
         max-file: "5"
@@ -154,6 +181,7 @@ services:
       - http_proxy=${RABBITMQ_HTTP_PROXY}
       - https_proxy=${RABBITMQ_HTTPS_PROXY}
       - no_proxy=${RABBITMQ_NO_PROXY}
+
     ports:
       - ${RABBITMQ_MANAGEMENT_PORT:-15672}:15672
       - ${RABBITMQ_PORT}:5672
@@ -161,10 +189,15 @@ services:
       - ./var/rabbit:/var/lib/rabbitmq
     restart: unless-stopped
     logging:
+      driver: json-file
       options:
         max-size: "20m"
         max-file: "5"
 
+
+  #----------------------------------------------------------------------------------------------------
+  # Flower
+  #----------------------------------------------------------------------------------------------------
   flower:
     container_name: flower
     image: mher/flower
@@ -177,9 +210,10 @@ services:
     depends_on:
       - rabbit
     logging:
-        options:
-            max-size: "20m"
-            max-file: "5"
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
 
   #----------------------------------------------------------------------------------------------------
   #   Redis
@@ -191,12 +225,13 @@ services:
       - 6379:6379
     restart: unless-stopped
     logging:
+      driver: json-file
       options:
         max-size: "20m"
         max-file: "5"
 
   #----------------------------------------------------------------------------------------------------
-  #   Celery Service
+  # Celery Site Worker
   #----------------------------------------------------------------------------------------------------
   site_worker:
     # This auto-reloads
@@ -204,23 +239,34 @@ services:
     working_dir: /app/src
     container_name: site_worker
     image: django_site-worker
-    pull_policy: never
+
     depends_on:
       - rabbit
       - db
-    env_file: .env
+      - django
+
+    env_file:
+      - .env
+
     volumes:
       - .:/app
     restart: unless-stopped
     logging:
+      driver: json-file
       options:
         max-size: "20m"
         max-file: "5"
+
+    # Compose 2.x equivalent of deploy.resources.limits.memory.
     deploy:
       resources:
         limits:
           memory: 15GB
 
+
+  #----------------------------------------------------------------------------------------------------
+  # Celery Compute Worker
+  #----------------------------------------------------------------------------------------------------
   compute_worker:
     command: ["celery -A compute_worker worker -l info -Q compute-worker -n compute-worker@%n"]
     working_dir: /app
@@ -245,6 +291,7 @@ services:
       - COMPUTE_WORKER_NO_CLEANUP=True
     tty: true
     logging:
+      driver: json-file
       options:
         max-size: "20m"
         max-file: "5"

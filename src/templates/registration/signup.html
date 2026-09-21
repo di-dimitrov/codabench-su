@@ -51,6 +51,82 @@
             </div>
             {% endif %}
 
+                        <div class="field">
+                <div class="ui left icon input">
+                    <i class="id card icon"></i>
+                    <input type="text"
+                           name="first_name"
+                           placeholder="first name"
+                           id="id_first_name"
+                           value="{{ form.first_name.value|default:''}}"
+                           maxlength="{{ form.first_name.field.max_length }}"
+                           autocomplete="given-name"
+                           required>
+                </div>
+            </div>
+            {% if form.first_name.errors %}
+            <div class="ui red message">
+                {{ form.first_name.errors }}
+            </div>
+            {% endif %}
+
+            <div class="field">
+                <div class="ui left icon input">
+                    <i class="id card icon"></i>
+                    <input type="text"
+                           name="last_name"
+                           placeholder="last name"
+                           id="id_last_name"
+                           value="{{ form.last_name.value|default:''}}"
+                           maxlength="{{ form.last_name.field.max_length }}"
+                           autocomplete="family-name"
+                           required>
+                </div>
+            </div>
+            {% if form.last_name.errors %}
+            <div class="ui red message">
+                {{ form.last_name.errors }}
+            </div>
+            {% endif %}
+
+            <div class="field">
+                <div class="ui left icon input">
+                    <i class="users icon"></i>
+                    <input type="text"
+                           name="team_name"
+                           placeholder="team name"
+                           id="id_team_name"
+                           value="{{ form.team_name.value|default:''}}"
+                           maxlength="{{ form.team_name.field.max_length }}"
+                           autocomplete="off"
+                           required>
+                </div>
+            </div>
+            {% if form.team_name.errors %}
+            <div class="ui red message">
+                {{ form.team_name.errors }}
+            </div>
+            {% endif %}
+
+            <div class="field">
+                <div class="ui left icon input">
+                    <i class="university icon"></i>
+                    <input type="text"
+                           name="affiliation"
+                           placeholder="affiliation (university, company or institute)"
+                           id="id_affiliation"
+                           value="{{ form.affiliation.value|default:''}}"
+                           maxlength="{{ form.affiliation.field.max_length }}"
+                           autocomplete="organization"
+                           required>
+                </div>
+            </div>
+            {% if form.affiliation.errors %}
+            <div class="ui red message">
+                {{ form.affiliation.errors }}
+            </div>
+            {% endif %}
+
             <div class="field">
                 <div class="ui left icon input">
                     <i class="lock icon"></i>
@@ -89,7 +165,7 @@
 
             <div>
                 <input type="checkbox" name="checkbox" id="id_checkbox" required>
-                <label for="id_checkbox">I accept the <a href="https://github.com/codalab/codabench/blob/master/documentation/PRIVACY.md" target="_blank">terms and conditions</a>.</label>
+                <label for="id_checkbox">I accept the <a href="https://github.com/codalab/codalab-competitions/wiki/Privacy" target="_blank">terms and conditions</a>.</label>
             </div>
 
             <button class="ui blue fluid submit button" type="submit">Sign Up</button>

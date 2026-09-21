@@ -70,6 +70,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     first_name = models.CharField(max_length=200, unique=False, null=True, blank=True)
     last_name = models.CharField(max_length=200, unique=False, null=True, blank=True)
     title = models.CharField(max_length=200, unique=False, null=True, blank=True)
+    team_name = models.CharField(max_length=100, blank=True, unique=False)
+    affiliation = models.CharField(max_length=200, blank=True, unique=False)
     location = models.CharField(max_length=250, unique=False, null=True, blank=True)
     biography = models.CharField(max_length=4096, unique=False, null=True, blank=True)
     personal_url = models.URLField(unique=False, null=True, blank=True)
@@ -96,6 +98,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     rabbitmq_queue_limit = models.PositiveIntegerField(default=10, blank=True)
     rabbitmq_username = models.CharField(max_length=36, null=True, blank=True)
     rabbitmq_password = models.CharField(max_length=36, null=True, blank=True)
+
+    # Robot submissions
+    is_bot = models.BooleanField(default=False)
 
     # Required for social auth and such to create users
     objects = CodabenchUserManager()
