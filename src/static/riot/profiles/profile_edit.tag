@@ -44,6 +44,16 @@
             <input disabled type="text" name="email" placeholder="Email">
         </div>
         <div class="two fields">
+            <div class="field" id="team_name">
+                <label>Team Name</label>
+                <input type="text" name="team_name" placeholder="Team Name">
+            </div>
+            <div class="field" id="affiliation">
+                <label>Affiliation</label>
+                <input type="text" name="affiliation" placeholder="Affiliation">
+            </div>
+        </div>
+        <div class="two fields">
             <div class="field" id="personal_url">
                 <label>Personal Website</label>
                 <input type="text" name="personal_url" placeholder="Personal URL">
@@ -95,6 +105,8 @@
                 title:          selected_user.title,
                 location:       selected_user.location,
                 biography:      selected_user.biography,
+                team_name:      selected_user.team_name,
+                affiliation:    selected_user.affiliation,
                 })
              $('#user-form').form({
                  keyboardShortcuts: false,

@@ -78,6 +78,22 @@
                     </div>
                 </div>
 
+                <!-- Team Name -->
+                <div if="{ selected_user.team_name }" class="about-block">
+                    <div class="flex-container">
+                        <div class="label">Team Name</div>
+                        <div class="value">{selected_user.team_name}</div>
+                    </div>
+                </div>
+
+                <!-- Affiliation -->
+                <div if="{ selected_user.affiliation }" class="about-block">
+                    <div class="flex-container">
+                        <div class="label">Affiliation</div>
+                        <div class="value">{selected_user.affiliation}</div>
+                    </div>
+                </div>
+
                 <!--  Do not show to other users  -->
                 <div if="{selected_user.id === CODALAB.state.user.id}">
                     <!-- Email -->

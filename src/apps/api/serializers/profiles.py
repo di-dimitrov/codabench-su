@@ -146,6 +146,8 @@ class UserSerializer(ModelSerializer):
             'linkedin_url',
             'twitter_url',
             'github_url',
+            'team_name',
+            'affiliation',
             'organizations',
             'organizer_direct_message_updates',
             'allow_forum_notifications',
