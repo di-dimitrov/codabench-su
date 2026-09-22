@@ -78,6 +78,7 @@ OUR_APPS = (
     'forums',
     'announcements',
     'oidc_configurations',
+    'external_competitions',
 )
 INSTALLED_APPS = THIRD_PARTY_APPS + OUR_APPS + ('autoenroll',)
 
