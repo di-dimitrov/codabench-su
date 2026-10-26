@@ -15,6 +15,7 @@ from competitions.models import (
     Competition,
     CompetitionCreationTaskStatus,
     CompetitionDump,
+    CompetitionParticipant,
     Phase,
     Submission,
     SubmissionDetails,
@@ -973,21 +974,27 @@ def manual_migration(phase_id):
 @app.task(queue="site-worker", soft_time_limit=60 * 5)
 def batch_send_email(comp_id, content):
     try:
-        competition = Competition.objects.prefetch_related("participants__user").get(
-            id=comp_id
-        )
+        competition = Competition.objects.get(id=comp_id)
     except Competition.DoesNotExist:
         logger.error(
             f"Not sending emails because competition with id {comp_id} could not be found"
         )
         return
 
+    # Denied users must not receive organizer messages (this also covers the rows created by apps/autoenroll),
+    # and neither do deleted accounts. Everyone else on the participant list, whatever their status, does.
+    recipients = (
+        competition.participants
+        .exclude(status=CompetitionParticipant.DENIED)
+        .filter(user__is_deleted=False)
+        .values_list("user__email", flat=True)
+    )
+
+    # Recipients go in BCC, in batches, so nobody sees anybody else's address (see codalab_send_markdown_email)
     codalab_send_markdown_email(
         subject=f"A message from the admins of {competition.title}",
         markdown_content=content,
-        recipient_list=[
-            participant.user.email for participant in competition.participants.all()
-        ],
+        recipient_list=list(recipients),
     )
 
 

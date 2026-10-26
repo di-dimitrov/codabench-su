@@ -27,3 +27,7 @@ DEBUG_TOOLBAR_CONFIG = {
     "SHOW_TOOLBAR_CALLBACK": lambda request: False
 }
 IS_TESTING = True
+
+# Auto-enrollment is tied to production competition PKs; keep it from firing on unrelated test data.
+TASK9_COMPETITION_IDS = []
+TASK9_TITLE_PREFIX = "__no_task9_competitions_in_tests__"

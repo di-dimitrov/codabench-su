@@ -122,6 +122,10 @@
         CODALAB.events.on('competition_loaded', function(competition) {
             self.competition_title = competition.title
             self.competition_id = competition.id
+            // Coming from the pending badge of the competition list: show the requests waiting for a decision
+            if (window.location.hash === '#pending-participants') {
+                $(self.refs.participant_status).dropdown('set selected', 'pending')
+            }
             self.update_participants()
         })
 
@@ -175,6 +179,7 @@
                         toastr.success('Approved successfully')
                     }
                     self.update_participants()
+                    CODALAB.events.trigger('participants_status_changed')
                 })
                 .fail((resp) => {
                     let errorMessage = 'An error occurred while updating the status.'

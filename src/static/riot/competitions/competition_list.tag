@@ -26,7 +26,18 @@
                             </thead>
                             <tbody>
                             <tr each="{ competition in organizing_competitions.results }" no-reorder>
-                                <td><a href="{ URLS.COMPETITION_DETAIL(competition.id) }">{ competition.title }</a></td>
+                                <td>
+                                    <a href="{ URLS.COMPETITION_DETAIL(competition.id) }">{ competition.title }</a>
+                                    <!-- Participation requests waiting for the organizers' approval or denial -->
+                                    <a if="{ competition.pending_participants_count > 0 }"
+                                       class="ui orange mini label pending-participants-label"
+                                       href="{ URLS.COMPETITION_DETAIL(competition.id) }#pending-participants"
+                                       data-tooltip="{ competition.pending_participants_count } participation request(s) waiting for approval or denial"
+                                       data-inverted=""
+                                       data-position="top left">
+                                        <i class="hourglass half icon"></i>{ competition.pending_participants_count } pending
+                                    </a>
+                                </td>
                                 <td class="center aligned">{ competition.competition_type }</td>
                                 <td>{ timeSince(Date.parse(competition.created_when)) } ago</td>
                                 <td class="center aligned">
@@ -92,6 +103,11 @@
             </div>
         </div>
     </div>
+    <style>
+        .pending-participants-label {
+            margin-left: 0.75em !important;
+        }
+    </style>
     <script>
         var self = this
 

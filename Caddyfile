@@ -71,7 +71,7 @@
         @min_bucket {
                 path /{$AWS_STORAGE_BUCKET_NAME}* /{$AWS_STORAGE_PRIVATE_BUCKET_NAME}*
         }
-        reverse_proxy @min_bucket minio:{$MINIO_PORT}
+        reverse_proxy @min_bucket minio:9000
 
         # Allows to use `.gz` files when available:
         encode gzip

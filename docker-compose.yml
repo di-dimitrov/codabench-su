@@ -1,5 +1,3 @@
-version: "2.4"
-
 services:
 
   #----------------------------------------------------------------------------------------------------
@@ -32,15 +30,6 @@ services:
     image: django_site-worker
 
     # We use watchmedo to reload gunicorn nicely.
-    # Explicit /bin/sh -c is required because we use &&.
-    #command:
-    #  - /bin/sh
-    #  - -c
-    #  - |
-    #    python manage.py migrate --no-input &&
-    #    python manage.py collectstatic --no-input &&
-    #    cd /app/src &&
-    #    watchmedo auto-restart -p '*.py' --recursive -- python3 ./gunicorn_run.py
     command: ["python manage.py migrate --no-input && python manage.py collectstatic --no-input && cd /app/src && watchmedo auto-restart -p '*.py' --recursive -- python3 ./gunicorn_run.py"]
 
     environment:
@@ -329,35 +318,16 @@ services:
         max-size: "20m"
         max-file: "5"
 
-    # Compose 2.x equivalent of deploy.resources.limits.memory.
     deploy:
       resources:
         limits:
-          # Limit memory substantially here so we see any problems that may
-          # appear on Heroku ahead of time
-          memory: 512M
+          memory: 5GB
 
 
   #----------------------------------------------------------------------------------------------------
   # Celery Compute Worker
   #----------------------------------------------------------------------------------------------------
   compute_worker:
-  #  command: "uv run celery -A compute_worker worker -l info -Q compute-worker -n compute-worker@%%n"
-  #compute_worker:
-  #  command: "celery -A compute_worker worker -l info -Q compute-worker -n compute-worker@%n"
-  #compute_worker:
-  #  command:
-  #    - celery
-  #    - -A
-  #    - compute_worker
-  #    - worker
-  #    - -l
-  #    - info
-  #    - -Q
-  #    - compute-worker
-  #    - -n
-  #    - compute-worker@%n
-
     command: ["celery -A compute_worker worker -l info -Q compute-worker"]
     working_dir: /app
     container_name: compute_worker

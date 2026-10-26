@@ -25,6 +25,12 @@
                         <a href="{URLS.COMPETITION_EDIT(competition.id)}" class="ui button">Edit</a>
                         <button class="ui small button" onclick="{show_modal.bind(this, '.manage-participants.modal')}">
                             Participants
+                            <!-- Participation requests waiting for approval or denial -->
+                            <span if="{competition.pending_participants_count > 0}"
+                                  class="ui orange circular mini label"
+                                  title="{competition.pending_participants_count} participation request(s) waiting for approval or denial">
+                                {competition.pending_participants_count}
+                            </span>
                         </button>
                         <button class="ui small button" onclick="{show_modal.bind(this, '.manage-submissions.modal')}">
                             Submissions
@@ -219,8 +225,24 @@
             self.update()
             if (self.competition.admin) {
                 self.update_files()
+                // Coming from the pending badge of the competition list: open the participants right away
+                if (window.location.hash === '#pending-participants') {
+                    _.delay(() => self.show_modal('.manage-participants.modal'), 0)
+                }
             }
             $('.dropdown', self.root).dropdown()
+        })
+
+        // The participant manager changed someone's status, so the number of pending requests may have changed
+        CODALAB.events.on('participants_status_changed', function () {
+            if (!self.competition.id || !self.competition.admin) {
+                return
+            }
+            CODALAB.api.get_participants({competition: self.competition.id, status: 'pending', user__is_deleted: false})
+                .done(function (pending_participants) {
+                    self.competition.pending_participants_count = pending_participants.length
+                    self.update()
+                })
         })
 
         self.close_modal = selector => $(selector).modal('hide')

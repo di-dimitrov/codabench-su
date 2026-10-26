@@ -6,7 +6,8 @@ from io import StringIO
 from django.http import HttpResponse
 from tempfile import SpooledTemporaryFile
 from django.db import IntegrityError
-from django.db.models import Subquery, OuterRef, Q
+from django.db.models import Count, IntegerField, Subquery, OuterRef, Q
+from django.db.models.functions import Coalesce
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -72,6 +73,16 @@ class CompetitionViewSet(ModelViewSet):
                     (Q(created_by=self.request.user)) |
                     (Q(collaborators__in=[self.request.user]))
                 ).distinct()
+
+                # Participation requests still waiting for the organizers' approval or denial. Only added to this
+                # list, which holds just the competitions the user organizes, so counts never reach other users.
+                # A subquery (not a join) so the collaborators join above cannot multiply the count.
+                pending_requests = CompetitionParticipant.objects.filter(
+                    competition=OuterRef('pk'), status=CompetitionParticipant.PENDING, user__is_deleted=False
+                ).order_by().values('competition').annotate(total=Count('pk')).values('total')
+                qs = qs.annotate(
+                    pending_participants_count=Coalesce(Subquery(pending_requests, output_field=IntegerField()), 0)
+                )
 
             # `participating_in` is true when this is called from "Participating" tab of benchmark management
             participating_in = self.request.query_params.get('participating_in', None)
@@ -411,9 +422,8 @@ class CompetitionViewSet(ModelViewSet):
         comp = self.get_object()
         if not comp.user_has_admin_permission(self.request.user):
             raise PermissionDenied('You do not have permission to email these competition participants')
-        try:
-            content = request.data['message']
-        except KeyError:
+        content = request.data.get('message')
+        if not content or not str(content).strip():
             return Response({'detail': 'A message is required to send an email'}, status=status.HTTP_400_BAD_REQUEST)
         batch_send_email.apply_async((comp.pk, content))
         return Response({}, status=status.HTTP_200_OK)
@@ -453,6 +463,7 @@ class CompetitionViewSet(ModelViewSet):
 
                 if submission_key not in leaderboard_data[leaderboard_titles[phase['id']]]:
                     leaderboard_data[leaderboard_titles[phase['id']]][submission_key] = OrderedDict()
+                    leaderboard_data[leaderboard_titles[phase['id']]][submission_key]['Team Name'] = submission['team_name']
 
                     if submission.get('fact_sheet_answers'):
                         leaderboard_data[leaderboard_titles[phase['id']]][submission_key].update({
@@ -900,6 +911,7 @@ class PhaseViewSet(ModelViewSet):
                 response['submissions'].append({
                     'id': submission_parent_id,
                     'owner': submission['display_name'] or submission['owner'],
+                    'team_name': submission['team_name'],
                     'scores': [],
                     'detailed_results': [],
                     'fact_sheet_answers': submission['fact_sheet_answers'],
@@ -1041,9 +1053,8 @@ class CompetitionParticipantViewSet(ModelViewSet):
         competition = participant.competition
         if not competition.user_has_admin_permission(self.request.user):
             raise PermissionDenied('You do not have permission to email participants')
-        try:
-            message = request.data['message']
-        except KeyError:
+        message = request.data.get('message')
+        if not message or not str(message).strip():
             return Response({'detail': 'A message is required to send an email'}, status=status.HTTP_400_BAD_REQUEST)
         send_direct_participant_email(participant=participant, content=message)
         return Response({}, status=status.HTTP_200_OK)

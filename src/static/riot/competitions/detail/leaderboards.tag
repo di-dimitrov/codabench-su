@@ -28,12 +28,13 @@
         </tr>
         <tr class="task-row">
             <th>Task:</th>
-            <th colspan="{ has_group_queues ? 4 : 3 }"></th>
+            <th colspan="{ has_group_queues ? 5 : 4 }"></th>
             <th each="{ task in filtered_tasks }" class="center aligned" colspan="{ task.colWidth }">{ task.name }</th>
         </tr>
         <tr>
             <th class="center aligned">#</th>
-            <th>Participant</th>
+            <th>Team Name</th>
+            <th>Username</th>
             <th>Date</th>
             <th>ID</th>
             <th if="{ has_group_queues }">Groups</th>
@@ -56,8 +57,8 @@
                     <fifth-place-medal if="{get_row_number(index) === 5}"></fifth-place-medal>
                     <virtual if="{get_row_number(index) > 5}">{get_row_number(index)}</virtual>
                 </td>
-                <td if="{submission.organization === null}"><a href="{submission.slug_url}">{ submission.owner }</a></td>
-                <td if="{submission.organization !== null}"><a href="{submission.organization.url}">{ submission.organization.name }</a></td>
+                <td>{ submission.team_name }</td>
+                <td><a href="{submission.slug_url}">{ submission.owner }</a></td>
                 <td data-sort="{ sort_date_value(submission.created_when) }"
                     data-sort-value="{ sort_date_value(submission.created_when) }">
                     { pretty_date(submission.created_when) }

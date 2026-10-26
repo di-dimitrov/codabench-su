@@ -23,11 +23,16 @@ class SubmissionLeaderBoardSerializer(serializers.ModelSerializer):
     scores = SubmissionScoreSerializer(many=True)
     owner = serializers.CharField(source='owner.username')
     display_name = serializers.CharField(source='owner.display_name')
+    team_name = serializers.SerializerMethodField()
     slug_url = serializers.CharField(source='owner.slug_url')
     organization = SimpleOrganizationSerializer(allow_null=True)
     created_when = serializers.DateTimeField()
     queue_id = serializers.SerializerMethodField()
     queue_name = serializers.SerializerMethodField()
+
+    def get_team_name(self, obj):
+        # Users who signed up before team names existed (or through OIDC) have none
+        return (obj.owner.team_name or '').strip() or 'N/A'
 
     def _get_effective_queue(self, obj):
         if obj.queue:
@@ -63,6 +68,6 @@ class SubmissionLeaderBoardSerializer(serializers.ModelSerializer):
         model = Submission
         fields = (
             'id', 'parent', 'owner', 'leaderboard_id', 'fact_sheet_answers',
-            'task', 'scores', 'display_name', 'slug_url', 'organization',
+            'task', 'scores', 'display_name', 'team_name', 'slug_url', 'organization',
             'detailed_result', 'created_when', 'queue_name', 'queue_id',
         )

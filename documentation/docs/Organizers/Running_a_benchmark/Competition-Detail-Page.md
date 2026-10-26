@@ -59,6 +59,8 @@ From here, you should be able to:
  - Approve/Deny participants
  - Revoke participants
 
+When you email all participants, write your message in the editor: the formatting you see in the preview (headings, bold, lists, tables, links, images) is what the email contains, together with a plain-text version for mail clients that do not show HTML. Every participant receives the message with their address hidden (all recipients are in BCC, so nobody sees anybody else's email), and participants with a denied status and deleted accounts are skipped.
+
 ![](_attachments/4f331c80-7d24-47f7-ba4f-71d4bd9dc003_17534367045066261.jpg)
 
 

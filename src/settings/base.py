@@ -563,8 +563,11 @@ EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.conso
 EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.sendgrid.net')
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD')
-EMAIL_PORT = os.environ.get('EMAIL_PORT', 587)
-EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', True)
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT') or 587)
+# Parsed as a boolean: the string "False" is truthy, so a plain os.environ.get() could never turn TLS off
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() in ('true', '1', 'yes', 'on')
+# Maximum recipients per message when emailing many people at once (all of them are in BCC); providers cap this
+EMAIL_BULK_BATCH_SIZE = int(os.environ.get('EMAIL_BULK_BATCH_SIZE') or 100)
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Codabench <noreply@codabench.org>')
 SERVER_EMAIL = os.environ.get('SERVER_EMAIL', 'noreply@codabench.org')
 
@@ -604,4 +607,9 @@ if EXTERNAL_COMPETITIONS_ENABLED:
 # =============================================================================
 # AUTO_ENROLLEMENT OPTIONS
 # =============================================================================
-TASK9_COMPETITION_IDS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+# Comma-separated competition PKs that share enrollment (see apps/autoenroll). The default is our
+# production set; override with the TASK9_COMPETITION_IDS env var. Empty falls back to matching
+# competition titles by TASK9_TITLE_PREFIX.
+TASK9_COMPETITION_IDS = [
+    int(i) for i in os.environ.get('TASK9_COMPETITION_IDS', '3,4,5,6,7,8,9,10,11,12,13,14').split(',') if i.strip()
+]

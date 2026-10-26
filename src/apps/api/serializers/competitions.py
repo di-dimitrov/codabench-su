@@ -377,6 +377,7 @@ class CompetitionDetailSerializer(serializers.ModelSerializer):
     submissions_count = serializers.IntegerField(read_only=True)
     queue = QueuePublicSerializer(read_only=True)
     whitelist_emails = serializers.SerializerMethodField()
+    pending_participants_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Competition
@@ -417,6 +418,7 @@ class CompetitionDetailSerializer(serializers.ModelSerializer):
         admin_fields = (
             'secret_key',
             'whitelist_emails',
+            'pending_participants_count',
             'collaborators',
             'queue',
             'auto_run_submissions',
@@ -425,15 +427,31 @@ class CompetitionDetailSerializer(serializers.ModelSerializer):
         )
         fields = public_fields + admin_fields
 
+    def user_is_admin(self, instance):
+        """Whether the requesting user administers this competition; looked up once per competition and request."""
+        user = self.context['request'].user
+        cache = self.__dict__.setdefault('_admin_check_cache', {})
+        key = (instance.pk, user.pk)
+        if key not in cache:
+            cache[key] = instance.user_has_admin_permission(user)
+        return cache[key]
+
     def get_leaderboards(self, instance):
         try:
-            if instance.user_has_admin_permission(self.context['request'].user):
+            if self.user_is_admin(instance):
                 qs = Leaderboard.objects.filter(phases__competition=instance).distinct('id')
             else:
                 qs = Leaderboard.objects.filter(phases__competition=instance, hidden=False).distinct('id')
         except KeyError:
             raise Exception(f'KeyError on context. Context: {self.context}')
         return LeaderboardSerializer(qs, many=True).data
+
+    def get_pending_participants_count(self, instance):
+        # Number of participation requests waiting for an approval or a denial, shown to organizers only
+        if not self.user_is_admin(instance):
+            return None
+        # Requests from deleted accounts cannot be acted on, so they are not counted
+        return instance.participants.filter(status=CompetitionParticipant.PENDING, user__is_deleted=False).count()
 
     def get_whitelist_emails(self, instance):
         whitelist_emails_query = instance.whitelist_emails.all()
@@ -449,10 +467,9 @@ class CompetitionDetailSerializer(serializers.ModelSerializer):
         This is a built-in function where we can choose which fields to include in the serializer's output
         """
         representation = super().to_representation(instance)
-        user = self.context['request'].user
 
         # If user is not admin/creator/collaborator then only include the public fields
-        if not instance.user_has_admin_permission(user):
+        if not self.user_is_admin(instance):
             for field in list(representation):
                 if field not in self.Meta.public_fields:
                     representation.pop(field)
@@ -464,6 +481,8 @@ class CompetitionSerializerSimple(serializers.ModelSerializer):
     created_by = serializers.CharField(source='created_by.username', read_only=True)
     owner_display_name = serializers.SerializerMethodField()
     participants_count = serializers.IntegerField(read_only=True)
+    # Only present in the organizer's own list ("mine"), where the view annotates it
+    pending_participants_count = serializers.IntegerField(read_only=True)
     first_phase_start = serializers.DateTimeField(read_only=True)
 
     class Meta:
@@ -485,7 +504,8 @@ class CompetitionSerializerSimple(serializers.ModelSerializer):
             'contact_email',
             'report',
             'is_featured',
-            'submissions_count'
+            'submissions_count',
+            'pending_participants_count',
         )
 
     def get_created_by(self, obj):

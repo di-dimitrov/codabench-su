@@ -59,6 +59,25 @@ class UserEditView(LoginRequiredMixin, DetailView):
         return context
 
 
+# Fields of the user record that only the user themselves (and staff) may see
+PRIVATE_PROFILE_FIELDS = (
+    'email',
+    'organizer_direct_message_updates',
+    'allow_forum_notifications',
+    'allow_organization_invite_emails',
+)
+
+
+class OwnerOrSuperuserMixin:
+    """Pages about one user's own account: other users get a 404 instead of that user's data."""
+
+    def get_object(self, *args, **kwargs):
+        user = super().get_object(*args, **kwargs)
+        if self.request.user.is_superuser or self.request.user == user:
+            return user
+        raise Http404()
+
+
 class UserDetailView(LoginRequiredMixin, DetailView):
     queryset = User.objects.all()
     template_name = 'profiles/user_profile.html'
@@ -69,6 +88,12 @@ class UserDetailView(LoginRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         user = self.get_object()
         user_data = UserSerializer(user).data
+        # The whole record is embedded in the page, so what must not be shown to other users has to be left out
+        # here: hiding it in the page's JavaScript still leaves it readable in the page source.
+        viewer = self.request.user
+        if viewer.pk != user.pk and not (viewer.is_staff or viewer.is_superuser):
+            for private_field in PRIVATE_PROFILE_FIELDS:
+                user_data.pop(private_field, None)
         # Fetch competitions organized by this user (as owner or collaborator)
         organized_qs = (
             Competition.objects
@@ -392,7 +417,7 @@ class CustomPasswordResetConfirmView(auth_views.PasswordResetConfirmView):
     success_url = django.urls.reverse_lazy("accounts:password_reset_complete")
 
 
-class UserNotificationEdit(LoginRequiredMixin, DetailView):
+class UserNotificationEdit(OwnerOrSuperuserMixin, LoginRequiredMixin, DetailView):
     queryset = User.objects.all()
     template_name = 'profiles/user_notifications.html'
     slug_url_kwarg = 'username'
@@ -451,7 +476,7 @@ class OrganizationInviteView(LoginRequiredMixin, TemplateView):
     template_name = 'profiles/organization_invite.html'
 
 
-class UserAccountView(LoginRequiredMixin, DetailView):
+class UserAccountView(OwnerOrSuperuserMixin, LoginRequiredMixin, DetailView):
     queryset = User.objects.all()
     template_name = 'profiles/user_account.html'
     slug_url_kwarg = 'username'

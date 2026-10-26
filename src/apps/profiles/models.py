@@ -234,6 +234,8 @@ class User(AbstractBaseUser, PermissionsMixin):
         self.display_name = None
         self.first_name = None
         self.last_name = None
+        self.team_name = ''
+        self.affiliation = ''
         self.title = None
         self.location = None
         self.biography = None
