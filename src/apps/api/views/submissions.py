@@ -63,33 +63,17 @@ class SubmissionViewSet(ModelViewSet):
                 if request.data["type"] in ["Docker_Image_Pull_Fail", "Execution_Time_Limit_Exceeded"]:
 
                     # Get the error message
-                    error_message = request.data['error_message']
+                    error_message = str(request.data.get('error_message', ''))
 
                     # Set file name to ingestion std error as default
                     error_file_name = "prediction_ingestion_stderr"
 
                     # Change error file name to scoring_stderr when error occurs during scoring
-                    if request.data.get("is_scoring", "False") == "True":
+                    is_scoring = request.data.get("is_scoring", "False") == "True"
+                    if is_scoring:
                         error_file_name = "scoring_stderr"
 
-                    try:
-                        # Get submission detail for this submission
-                        submission_detail = SubmissionDetails.objects.get(
-                            name=error_file_name,
-                            submission=obj,
-                        )
-
-                        # Read the existing content from the file
-                        existing_content = submission_detail.data_file.read().decode("utf-8")
-
-                        # Append the new error message to the existing content
-                        modified_content = existing_content + "\n" + error_message
-
-                        # write error message to the file
-                        submission_detail.data_file.save(submission_detail.data_file.name, ContentFile(modified_content.encode("utf-8")))
-
-                    except SubmissionDetails.DoesNotExist:
-                        logger.error("SubmissionDetails object not found.")
+                    self._write_error_log(obj, error_file_name, error_message, is_scoring)
 
             if self.action in ['update_fact_sheet', 'run_submission', 're_run_submission', 'resubmit_submission', 'migrate_to_phase', 'migrate_many_submissions']:
                 # get_queryset will stop us from re-running something we're not supposed to
@@ -102,6 +86,29 @@ class SubmissionViewSet(ModelViewSet):
                         raise PermissionDenied("Submission task cannot be updated")
                 except TypeError:
                     raise ValidationError(f"Secret: ({request.data.get('secret')}) not a valid UUID")
+
+    @staticmethod
+    def _write_error_log(submission, file_name, error_message, is_scoring):
+        """
+        Put an error reported by the compute worker in the submission's logs.
+
+        The log is created when it does not exist yet: failures before the programs run (for example a Docker image
+        that cannot be pulled) happen before any log exists, and the error used to be dropped. Storing the log must
+        never make the status update fail (the storage can be the very thing that is broken), so problems are only
+        logged here.
+        """
+        try:
+            submission_detail = SubmissionDetails.objects.filter(name=file_name, submission=submission).first()
+            if submission_detail is None:
+                submission_detail = SubmissionDetails(name=file_name, submission=submission, is_scoring=is_scoring)
+                submission_detail.data_file.save(f"{file_name}.txt", ContentFile(error_message.encode("utf-8")))
+            else:
+                # Append the new error message to the existing content
+                existing_content = submission_detail.data_file.read().decode("utf-8")
+                modified_content = existing_content + "\n" + error_message
+                submission_detail.data_file.save(submission_detail.data_file.name, ContentFile(modified_content.encode("utf-8")))
+        except Exception:
+            logger.exception(f"Could not store the error log '{file_name}' of submission {submission.pk}: {error_message}")
 
     def get_serializer_class(self):
         if self.request and self.request.method in ('POST', 'PUT', 'PATCH'):

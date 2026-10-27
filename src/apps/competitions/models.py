@@ -458,11 +458,56 @@ class Submission(models.Model):
         (FAILED, "Failed"),
     )
 
+    # Why a submission failed (set together with the Failed status, by the compute worker or by the server)
+    PLATFORM_FAILURE = "platform"      # the server / compute worker had a problem: not caused by the submission
+    SUBMISSION_FAILURE = "submission"  # the submission itself cannot be used (broken zip, missing files, ...)
+    PROGRAM_FAILURE = "program"        # a program failed while running the submission
+    SCORING_FAILURE = "scoring"        # the scoring program could not evaluate the submission
+    TIME_LIMIT_FAILURE = "time_limit"  # the execution time limit of the phase was exceeded
+
+    FAILURE_TYPE_CHOICES = (
+        (PLATFORM_FAILURE, "Platform error"),
+        (SUBMISSION_FAILURE, "Invalid submission"),
+        (PROGRAM_FAILURE, "Program error"),
+        (SCORING_FAILURE, "Scoring error"),
+        (TIME_LIMIT_FAILURE, "Time limit exceeded"),
+    )
+
+    # What a participant is told about each failure type: (title, message). Technical details (tracebacks, hostnames)
+    # stay in `status_details`, which only the organizers see for failed submissions.
+    FAILURE_SUMMARIES = {
+        PLATFORM_FAILURE: (
+            "Platform error",
+            "The platform had a problem while running your submission. This is not caused by your submission. "
+            "Please try again later, or contact the organizers if it keeps happening.",
+        ),
+        SUBMISSION_FAILURE: (
+            "Invalid submission",
+            "Your submission could not be used, for example a broken or incomplete zip file or a missing required "
+            "file. Check the logs for the reason.",
+        ),
+        PROGRAM_FAILURE: (
+            "Program error",
+            "A program failed while running your submission. Check the logs for the error.",
+        ),
+        SCORING_FAILURE: (
+            "Scoring error",
+            "The scoring program could not evaluate your submission. Check the logs, and contact the organizers if "
+            "you believe your submission is correct.",
+        ),
+        TIME_LIMIT_FAILURE: (
+            "Time limit exceeded",
+            "Your submission ran longer than the execution time limit of this phase.",
+        ),
+    }
+    DEFAULT_FAILURE_SUMMARY = ("Failed", "The submission failed. Check the logs for details.")
+
     description = models.CharField(max_length=240, default="", blank=True, null=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='submission', on_delete=models.DO_NOTHING)
     organization = models.ForeignKey(Organization, related_name='submissions', on_delete=models.DO_NOTHING, null=True)
     status = models.CharField(max_length=128, choices=STATUS_CHOICES, default=SUBMITTING, null=False, blank=False)
     status_details = models.TextField(null=True, blank=True)
+    failure_type = models.CharField(max_length=32, choices=FAILURE_TYPE_CHOICES, null=True, blank=True)
     phase = models.ForeignKey(Phase, related_name='submissions', on_delete=models.CASCADE)
     appear_on_leaderboards = models.BooleanField(default=False)
     data = models.ForeignKey("datasets.Data", on_delete=models.SET_NULL, related_name='submission', null=True, blank=True)
@@ -704,11 +749,15 @@ class Submission(models.Model):
         sub.start(tasks=tasks)
         return sub
 
-    def cancel(self, status=CANCELLED):
+    def failure_summary(self):
+        """(title, message) telling a participant why this submission failed, without technical details"""
+        return self.FAILURE_SUMMARIES.get(self.failure_type, self.DEFAULT_FAILURE_SUMMARY)
+
+    def cancel(self, status=CANCELLED, status_details=None, failure_type=None):
         if self.status not in [Submission.CANCELLED, Submission.FAILED, Submission.FINISHED]:
             if self.has_children:
                 for sub in self.children.all():
-                    sub.cancel(status=status)
+                    sub.cancel(status=status, status_details=status_details, failure_type=failure_type)
             celery_app = app
             # If a custom queue is set, we need to fetch the appropriate celery app
             # NOTE: We fetch the queue from submission and not from competition to be sure that we are using the correct queue
@@ -718,6 +767,10 @@ class Submission(models.Model):
             # We need to convert the UUID given by celery into a byte like object otherwise it won't work
             celery_app.control.revoke(str(self.celery_task_id), terminate=True)
             self.status = status
+            if status_details:
+                self.status_details = status_details
+            if failure_type:
+                self.failure_type = failure_type
             self.save()
             return True
         return False

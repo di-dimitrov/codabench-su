@@ -23,6 +23,10 @@
         # Removing some headers for improved security:
         header -Server
 
+        # Static files: browsers check with the server before reusing their copy (cheap, they get a 304 when
+        # nothing changed). Without it they guess how long to keep a file, which can be days after a release.
+        header /static/* Cache-Control "no-cache"
+
         @noRedirect {
                 not path /maintenance.html
                 not path /offline.png
@@ -76,10 +80,12 @@
         # Allows to use `.gz` files when available:
         encode gzip
 
-        # Logs, will keep 5 GB
+        # Logs: the file is rotated at 100 MiB and the 5 newest rotated files are kept (about 600 MiB at most).
+        # It used to be 5000 MiB per file with 10 kept, which could fill a small disk.
         log {
                 output file /var/log/caddyaccess.log {
-                        roll_size 5000MiB
+                        roll_size 100MiB
+                        roll_keep 5
                 }
         }
 }

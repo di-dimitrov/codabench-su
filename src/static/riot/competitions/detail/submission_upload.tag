@@ -90,7 +90,15 @@
                     
                 </div>
 
-                <input-file name="data_file" ref="data_file" error="{errors.data_file}" accept=".zip"></input-file>
+                <input-file name="data_file" ref="data_file" error="{errors.data_file}" accept=".zip" droppable="true"></input-file>
+
+                <!-- Nothing is sent until this button is clicked, so the answers above can be checked first -->
+                <button type="button"
+                        class="ui primary button submit-submission"
+                        disabled="{ !has_file || uploading }"
+                        onclick="{ check_can_upload }">
+                    <i class="upload icon"></i> Submit
+                </button>
             </form>
         </div>
 
@@ -184,6 +192,8 @@
         self.mixin(ProgressBarMixin)
         self.chart = undefined
         self.errors = {}
+        self.has_file = false    // a valid .zip is waiting in the drop zone
+        self.uploading = false   // the chosen file is being checked/uploaded, so the Submit button stays disabled
         self.lines = {}
         self.detailed_result_urls = {}
         self.selected_submission = {}
@@ -226,7 +236,7 @@
                 group._checked = e.target.checked
             }
 
-            $(self.refs.data_file.refs.file_input).on('change', self.check_can_upload)
+            $(self.refs.data_file.refs.file_input).on('file_valid file_cleared', self.sync_file_state)
             self.setup_autoscroll()
             self.setup_websocket()
         })
@@ -417,8 +427,14 @@
             self.autoscroll_output()
         }
 
+        // The drop zone tells us when a valid file was chosen or removed
+        self.sync_file_state = function () {
+            self.has_file = !!self.refs.data_file.file
+            self.update()
+        }
+
         self.clear_form = function () {
-            $('input-file[ref="data_file"]').find("input").val('')
+            self.refs.data_file.clear()
             self.errors = {}
             self.update()
         }
@@ -436,9 +452,14 @@
             // Check if selected phase accepts submissions (within the deadline of the phase)
             if(self.selected_phase.status === "Current"){
 
+                if (!self.has_file || self.uploading) {
+                    return
+                }
                 CODALAB.api.can_make_submissions(self.selected_phase.id)
                     .done(function (data) {
                         if (data.can) {
+                            self.uploading = true
+                            self.update()
                             self.prepare_upload(self.upload)()
                         } else {
                             toastr.error(data.reason)
@@ -501,7 +522,7 @@
                 type: 'submission',
                 competition: self.opts.competition.id
             }
-            var data_file = self.refs.data_file.refs.file_input.files[0]
+            var data_file = self.refs.data_file.file
             self.children = []
             self.children_statuses = {}
             CODALAB.api.create_dataset(data_file_metadata, data_file, self.file_upload_progress_handler)
@@ -558,6 +579,7 @@
                 })
                 .always(function () {
                     setTimeout(self.hide_progress_bar, 500)
+                    self.uploading = false
                     self.clear_form()
                 })
         }

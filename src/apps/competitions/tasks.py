@@ -1013,11 +1013,17 @@ def submission_status_cleanup():
         status=Submission.RUNNING, has_children=False
     ).select_related("phase", "parent")
 
+    grace_minutes = settings.SUBMISSION_STALE_GRACE_MINUTES
     for sub in submissions:
         if sub.started_when < now() - timedelta(
-            milliseconds=(3600000 * 24) + sub.phase.execution_time_limit
+            milliseconds=sub.phase.execution_time_limit, minutes=grace_minutes
         ):
-            if sub.parent is not None:
-                sub.parent.cancel(status=Submission.FAILED)
-            else:
-                sub.cancel(status=Submission.FAILED)
+            stuck = sub.parent if sub.parent is not None else sub
+            stuck.cancel(
+                status=Submission.FAILED,
+                status_details=(
+                    f"The submission was still running {grace_minutes} minutes after the execution time limit of its "
+                    f"phase, so the platform stopped it. The compute worker most likely stopped responding."
+                ),
+                failure_type=Submission.PLATFORM_FAILURE,
+            )

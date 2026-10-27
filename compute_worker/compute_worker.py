@@ -284,8 +284,19 @@ app.conf.task_queues = [
 # -----------------------------------------------
 # Exceptions
 # -----------------------------------------------
+class FailureType:
+    """Why a submission failed; the values are the ones the website expects in `failure_type`"""
+    PLATFORM = "platform"      # the server / compute worker had a problem: not caused by the submission
+    SUBMISSION = "submission"  # the submission itself cannot be used (broken zip, missing files, ...)
+    PROGRAM = "program"        # a program failed while running the submission
+    SCORING = "scoring"        # the scoring program could not evaluate the submission
+    TIME_LIMIT = "time_limit"  # the execution time limit of the phase was exceeded
+
+
 class SubmissionException(Exception):
-    pass
+    def __init__(self, message="", failure_type=None):
+        super().__init__(message)
+        self.failure_type = failure_type
 
 
 class DockerImagePullException(Exception):
@@ -370,12 +381,13 @@ def run_wrapper(run_args):
         else:
             msg = "Docker image pull failed."
 
-        run._update_status(SubmissionStatus.FAILED, extra_information=msg)
+        run._update_status(SubmissionStatus.FAILED, extra_information=msg, failure_type=FailureType.PLATFORM)
         raise
 
     except SoftTimeLimitExceeded:
         run._update_status(
-            SubmissionStatus.FAILED, extra_information="Execution time limit exceeded.")
+            SubmissionStatus.FAILED, extra_information="Execution time limit exceeded.",
+            failure_type=FailureType.TIME_LIMIT)
         raise
 
     except SubmissionException as e:
@@ -390,11 +402,14 @@ def run_wrapper(run_args):
                 msg = "Submission failed. Contact the Organizer(s) for more details."
             else:
                 msg = "Submission failed. See logs for more details."
-        run._update_status(SubmissionStatus.FAILED, extra_information=msg)
+        run._update_status(SubmissionStatus.FAILED, extra_information=msg, failure_type=e.failure_type)
         raise
 
     except Exception:
-        run._update_status(SubmissionStatus.FAILED, extra_information=traceback.format_exc())
+        # Anything not foreseen is a problem of the platform, not of the submission. The traceback goes to the
+        # organizers only (the website hides `status_details` of failed submissions from everyone else).
+        run._update_status(
+            SubmissionStatus.FAILED, extra_information=traceback.format_exc(), failure_type=FailureType.PLATFORM)
         raise
 
     finally:
@@ -770,15 +785,18 @@ class Run:
             logger.error(
                 f"Submission patch failed with status = {resp.status_code}, and response = \n{resp.content}"
             )
-            raise SubmissionException("Failure updating submission data.")
+            raise SubmissionException("Failure updating submission data.", failure_type=FailureType.PLATFORM)
 
-    def _update_status(self, status, extra_information=None):
+    def _update_status(self, status, extra_information=None, failure_type=None):
         # Update submission status
         if status not in SubmissionStatus.AVAILABLE_STATUSES:
             raise SubmissionException(
-                f"Status '{status}' is not in available statuses: {SubmissionStatus.AVAILABLE_STATUSES}"
+                f"Status '{status}' is not in available statuses: {SubmissionStatus.AVAILABLE_STATUSES}",
+                failure_type=FailureType.PLATFORM,
             )
         data = {"status": status, "status_details": extra_information}
+        if failure_type:
+            data["failure_type"] = failure_type
         try:
             self._update_submission(data)
         except Exception as e:
@@ -786,6 +804,39 @@ class Run:
             logger.exception(f"Failed to update submission status to {status}: {e}")
             if status in ("Finished", "Failed"):
                 raise
+
+    def _content_failure_type(self):
+        """Something in the program or data of the running stage is unusable: in the scoring stage that is the
+        organizers' scoring setup, before it that is the participant's submission"""
+        return FailureType.SCORING if self.is_scoring else FailureType.SUBMISSION
+
+    def _report_error(self, error_type, error_message, send_to_socket=False):
+        """
+        Tell the website about an error so it ends up in the submission's logs.
+
+        Reporting must never replace the error being reported: if the website cannot be reached (down, out of disk
+        space, ...), the problem is only logged here and the caller still raises the original error.
+        """
+        try:
+            self._update_submission({
+                "type": error_type,
+                "error_message": str(error_message),
+                "is_scoring": self.is_scoring,
+            })
+        except Exception:
+            logger.exception(f"Could not report '{error_type}' to the website, so it is missing from the submission logs: {error_message}")
+        if send_to_socket:
+            try:
+                asyncio.run(self._send_data_through_socket(str(error_message)))
+            except Exception:
+                logger.exception("Could not send the error through the web socket")
+
+    @staticmethod
+    def _pull_failure_reason(pull_error):
+        """A short, readable reason for the most common cause of a failed image pull, or None"""
+        if "no space left on device" in str(pull_error).lower():
+            return "the compute worker has no free disk space left"
+        return None
 
     def _get_container_image(self, image_name):
         logger.info("Running pull for image: {}".format(image_name))
@@ -807,24 +858,15 @@ class Run:
                         logger.error(
                             "There was a problem pulling the image : " + str(pull_error)
                         )
-                        # Prepare data to be sent to submissions api
-                        docker_pull_fail_data = {
-                            "type": "Docker_Image_Pull_Fail",
-                            "error_message": pull_error,
-                            "is_scoring": self.is_scoring,
-                        }
-                        # Send data to be written to ingestion logs
-                        self._update_submission(docker_pull_fail_data)
-                        # Send error through web socket to the frontend
-                        asyncio.run(self._send_data_through_socket(str(pull_error)))
+                        # Send the error to the website (written to the ingestion logs) and through the web socket
+                        # to the frontend. If that fails, the pull error below is still the one that is raised.
+                        self._report_error("Docker_Image_Pull_Fail", pull_error, send_to_socket=True)
+                        reason = self._pull_failure_reason(pull_error)
+                        failure = f"Pull for {image_name} failed" + (f" ({reason})" if reason else "")
                         if Settings.COMPUTE_WORKER_DISABLE_LOG_UPLOAD:
-                            raise DockerImagePullException(
-                                f"Pull for {image_name} failed! Contact the Organizer(s) for more details."
-                            )
+                            raise DockerImagePullException(f"{failure}! Contact the Organizer(s) for more details.")
                         else:
-                            raise DockerImagePullException(
-                                    f"Pull for {image_name} failed! Check the logs for more information"
-                                )
+                            raise DockerImagePullException(f"{failure}! Check the logs for more information")
                     else:
                         logger.warning("Failed. Retrying in 5 seconds...")
                         time.sleep(5) # Wait 5 seconds before retrying
@@ -836,13 +878,12 @@ class Run:
                 else:
                     logger.error("Image not found, aborting")
             except Exception as e:
+                # This report used to come after the raise, so it was never sent
+                self._report_error(
+                    "Docker_Image_Pull_Fail",
+                    "COMPETITION_ALLOW_IMAGE_PULL set to False but image is not present locally",
+                )
                 raise DockerImagePullException(f"Pull for {image_name} failed! COMPETITION_ALLOW_IMAGE_PULL is set to False, make sure the image is available locally")
-                docker_pull_fail_data = {
-                            "type": "Docker_Image_Pull_Fail",
-                            "error_message": "COMPETITION_ALLOW_IMAGE_PULL set to False but image is not present locally",
-                            "is_scoring": self.is_scoring,
-                }
-                self._update_submission(docker_pull_fail_data)
 
 
     async def _send_data_through_socket(self, error_message):
@@ -925,7 +966,8 @@ class Run:
                     urlretrieve(url, bundle_file)
                 except HTTPError:
                     raise SubmissionException(
-                        f"Problem fetching {url} to put in {destination}"
+                        f"Problem fetching {url} to put in {destination}",
+                        failure_type=FailureType.PLATFORM,
                     )
             try:
                 # Extract the contents to destination directory
@@ -935,7 +977,7 @@ class Run:
             except BadZipFile:
                 retries += 1
                 if retries >= max_retries:
-                    raise SubmissionException("Bad or empty zip file")
+                    raise SubmissionException("Bad or empty zip file", failure_type=self._content_failure_type())
                 else:
                     logger.warning("Failed. Retrying in 20 seconds...")
                     time.sleep(20)  # Wait 20 seconds before retrying
@@ -1035,7 +1077,7 @@ class Run:
             logger.debug("Created container: " + str(container))
         except Exception as e:
             logger.error(f"Error {e}")
-            raise SubmissionException(str(e))
+            raise SubmissionException(str(e), failure_type=FailureType.PLATFORM)
 
         return container
 
@@ -1237,7 +1279,7 @@ class Run:
         else:
             error_message = f"{program_dir} for {kind} missing 'metadata.yaml/metadata' file."
             logger.error(error_message)
-            raise SubmissionException(error_message)
+            raise SubmissionException(error_message, failure_type=self._content_failure_type())
 
         # Metadata file is found
         logger.info(f"Metadata path is {os.path.join(program_dir, metadata_path)}")
@@ -1257,7 +1299,10 @@ class Run:
                 logger.error(f"Error parsing YAML file: {e}")
 
             if not command:
-                raise SubmissionException(f"Missing 'command' for {kind} in metadata or metadata format is not correct!")
+                raise SubmissionException(
+                    f"Missing 'command' for {kind} in metadata or metadata format is not correct!",
+                    failure_type=self._content_failure_type(),
+                )
 
         # Prepare volumes_host and volumes_config
         volumes_host = [
@@ -1316,7 +1361,7 @@ class Run:
             return await self._run_container_engine_cmd(container, kind=kind)
         except Exception as e:
             logger.exception("Program directory execution failed")
-            raise SubmissionException(str(e))
+            raise SubmissionException(str(e), failure_type=FailureType.PLATFORM)
 
     def _put_dir(self, url, directory):
         """Zip the directory and send it to the given URL using _put_file."""
@@ -1565,7 +1610,7 @@ class Run:
             self._update_submission(execution_time_limit_exceeded_data)
             # Send error through web socket to the frontend
             asyncio.run(self._send_data_through_socket(error_message))
-            raise SubmissionException(error_message)
+            raise SubmissionException(error_message, failure_type=FailureType.TIME_LIMIT)
 
         finally:
             signal.alarm(0)
@@ -1658,7 +1703,7 @@ class Run:
                     extra_information=f"program_rc={program_rc}, async={task_results}",
                 )
                 # Raise so upstream marks failed immediately
-                raise SubmissionException("Child task failed or non-zero return code")
+                raise SubmissionException("Child task failed or non-zero return code", failure_type=FailureType.SCORING)
 
             if not self.human_in_the_loop:
                 self._update_status(SubmissionStatus.FINISHED)
@@ -1758,7 +1803,8 @@ class Run:
                     scores = json.load(f)
                 except json.decoder.JSONDecodeError as e:
                     raise SubmissionException(
-                        f"Could not decode scores json properly, it contains an error.\n{e.msg}"
+                        f"Could not decode scores json properly, it contains an error.\n{e.msg}",
+                        failure_type=FailureType.SCORING,
                     )
 
         elif os.path.exists(os.path.join(self.output_dir, "scores.txt")):
@@ -1767,7 +1813,8 @@ class Run:
                 scores = yaml.safe_load(f)
         else:
             raise SubmissionException(
-                "Could not find scores file, did the scoring program output it?"
+                "Could not find scores file, did the scoring program output it?",
+                failure_type=FailureType.SCORING,
             )
 
         url = (
@@ -1809,7 +1856,7 @@ class Run:
                 f.write(yaml.dump(prog_status, default_flow_style=False))
         except Exception as e:
             logger.error(e)
-            raise SubmissionException("Failed to write metadata file.")
+            raise SubmissionException("Failed to write metadata file.", failure_type=FailureType.PLATFORM)
 
         if not self.is_scoring:
             if not Settings.COMPUTE_WORKER_DISABLE_PREDICTION_UPLOAD:

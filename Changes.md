@@ -36,6 +36,12 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 | 17 | 2026-10-26 | Privacy | Other users' emails no longer sent to the browser; account/notification pages owner-only | uncommitted |
 | 18 | 2026-10-24..26 | Tests | Tests written (not run) and `src/conftest.py` | uncommitted, owner ignores tests |
 | 19 | 2026-10-26 | Tests | Mass-email test file deleted | done |
+| 20 | 2026-10-27 | Submissions UI | Drag & drop zone with zip checks and an explicit Submit button | uncommitted |
+| 21 | 2026-10-27 | Static files | `ASSET_VERSION` cache busting + `no-cache` header on `/static/*` | uncommitted |
+| 22 | 2026-10-27 | Failed submissions | Docker pull failure is reported reliably and its log is created | uncommitted |
+| 23 | 2026-10-27 | Failed submissions | Failure types, ERROR tab, organizer-only details, configurable stuck-submission cleanup | uncommitted |
+| 24 | 2026-10-27 | Backups / disk | Backup script: weekly MinIO archive, small retention, free-space check, correct path | uncommitted |
+| 25 | 2026-10-27 | Disk | Caddy access log rotates at 100 MiB, 5 files kept | uncommitted |
 
 ---
 
@@ -211,6 +217,128 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
   behaviour. The tracked upstream `src/apps/competitions/tests/test_emails.py` was NOT touched.
 - **Effect:** the mass-email code of entries 10 and 14 now has no tests; entry 10's "covered by a test" notes no longer apply.
 
+### 20. Submission upload: drag & drop zone, zip checks, explicit Submit button
+- **Files:** `src/static/riot/forms/input-file.tag`, `src/static/riot/competitions/detail/submission_upload.tag`,
+  `src/apps/api/serializers/datasets.py`
+- **What (decisions by the owner):**
+  - `input-file` has a new optional mode (`droppable="true"`): a drop zone you can also click to browse. The default mode
+    used by every other form (competition bundle upload, datasets, resources, tasks) is unchanged.
+  - The chosen file is checked immediately, for both drop and browse: exactly one file, not a folder, not empty, name ends
+    in `.zip` (any letter case) and the first bytes are a zip signature (catches a renamed non-zip). Any problem shows a red
+    message under the zone and a toast, and the file is not kept. File name rules are NOT checked (only the extension).
+  - Choosing or dropping a file no longer starts the submission. The file is shown (name, size, Remove button) and a
+    **Submit** button in the form starts the upload; it is disabled without a valid file and while an upload runs. Phase
+    and limit checks (`can_make_submissions`) run when Submit is clicked, as before.
+  - Server: the `.zip` extension check in `DataSerializer.validate` is now case-insensitive (`RESULTS.ZIP` was rejected).
+    The duplicate-name check and everything else are unchanged. The compute worker reads the zip with `ZipFile` and does
+    not depend on the file name.
+- **Not changed:** the competition bundle upload (`competitions/upload.tag`) still uploads as soon as a file is picked.
+- **Needs:** front-end rebuild; participants only get it immediately once the cache-busting `ASSET_VERSION` change is
+  made (proposed, not yet applied).
+- **Verified:** read back and reviewed by hand only. Not run in a browser. Manual test list: valid zip, `.ZIP`, `.txt`,
+  a `.txt` renamed to `.zip`, two files, a folder, remove then re-pick the same file, Submit while the phase is closed.
+
+### 21. Static file cache busting (`ASSET_VERSION`)
+- **Files:** `src/utils/static_storage.py` (new), `src/settings/base.py`, `Caddyfile`, `.env_sample`
+- **Why:** after the update the browser kept an old `init.js` (calling `particlesJS`) with the new pages, which broke
+  menus and dropdowns until the cache was emptied. Participants who visited the old version would hit the same thing.
+- **What:**
+  - `VersionedStaticFilesStorage` appends `?v=<ASSET_VERSION>` to every `{% static %}` URL. Files keep their names, so
+    `collectstatic` and Caddy are unaffected. `ASSET_VERSION` comes from `.env` (default `1`).
+  - `base.py` uses it as the `staticfiles` storage. `settings/production.py` (whitenoise, hashed names) and
+    `settings/test.py` keep their own storage and are not affected.
+  - Caddy sends `Cache-Control: no-cache` for `/static/*`, so browsers recheck before reusing a file (a 304 when
+    unchanged). This also covers files referenced from CSS or built in JavaScript, which get no `?v=`.
+- **Operation:** change `ASSET_VERSION` in `.env` at every deploy and recreate the django container
+  (`docker compose up -d`; a plain restart does not re-read `.env`). The first deploy changes every URL already
+  (default `1`, no `?v=` before), so everyone refetches once.
+- **Not versioned:** images and fonts referenced from inside CSS files, and URLs built in JavaScript from `STATIC_URL`.
+- **Verified:** read back by hand only. After deploy, view the page source: scripts should end in `?v=<value>`.
+
+### 22. Failed submission 2: root cause and two fixes
+- **Investigation (no change):** submission 2 failed with a tooltip full of `HTTPSConnectionPool ... too many 500 error
+  responses` and no logs. The stored traceback showed the worker failing in `prepare()` -> `_get_container_image` (Docker
+  image pull) and then failing again while reporting that failure to `PATCH /api/submissions/2/`. A manual
+  `docker pull codalab/codalab-legacy:py37` on the server failed with `no space left on device`: **the server disk is
+  full**. The pull filled it, Postgres could no longer write, so the worker's status updates returned 500.
+- **Files:** `compute_worker/compute_worker.py`, `src/apps/api/views/submissions.py`
+- **Worker:** new `_report_error()` sends the error to the website but never lets a failure of that call replace the real
+  error (it only logs it); used for both Docker pull failure branches and the "image not present locally" branch, whose
+  report sat after a `raise` and was never sent. A pull failure caused by a full disk now says so in the message
+  ("Pull for <image> failed (the compute worker has no free disk space left)!"). The error text is sent as a string.
+- **Server:** for `Docker_Image_Pull_Fail` / `Execution_Time_Limit_Exceeded` reports, the log
+  (`prediction_ingestion_stderr` or `scoring_stderr`) is now created when it does not exist yet (before, the message was
+  dropped with "SubmissionDetails object not found", which is why such failures showed no logs). Problems while writing
+  the log are logged and can no longer turn the status update into a 500.
+- **Not done (proposed):** the error panel, failure categories and a `failure_type` field (see the discussion of
+  platform / submission / program / scoring failures).
+- **Needs:** `./compute_worker` is mounted into the worker container, so `docker compose restart compute_worker` is enough
+  (no image rebuild); the django container reloads by itself. **Free disk space first**, otherwise the same failure
+  repeats.
+- **Verified:** compiled and read back only.
+
+### 23. Failed submissions: failure types, clear error display, faster stuck-submission cleanup
+- **Files:** `src/apps/competitions/models.py`, `src/apps/competitions/migrations/0066_submission_failure_type.py` (new),
+  `src/apps/api/serializers/submissions.py`, `src/apps/competitions/tasks.py`, `src/settings/base.py`, `.env_sample`,
+  `compute_worker/compute_worker.py`, `src/static/riot/competitions/detail/submission_manager.tag`,
+  `src/static/riot/competitions/detail/submission_modal.tag`
+- **Failure types** (new nullable field `Submission.failure_type`, migration 0066): `platform` (server / compute worker
+  problem, not the submission's fault), `submission` (unusable zip, missing metadata/files), `program` (a program
+  failed), `scoring` (scoring program could not evaluate), `time_limit`. Each has a title and a plain explanation
+  (`Submission.FAILURE_SUMMARIES`); old failures without a type show a generic "Failed".
+- **Worker:** `SubmissionException` can carry a type; it is set where the worker fails (API/storage/Docker/container
+  problems = platform, unreadable zip or metadata = submission before scoring and scoring after it, missing or
+  undecodable scores file and non-zero scoring exit = scoring, time limit = time_limit). The generic "anything else"
+  path is a platform failure. `_update_status()` sends the type with the Failed status. The type is cleared by the
+  server whenever a non-failed status is reported (a submission started again).
+- **Server:** `SubmissionSerializer` returns `failure_type`, `failure_title`, `failure_message`. For a FAILED submission
+  `status_details` (tracebacks, host names, paths) is now only returned to organizers; everyone else gets the plain
+  explanation (Human-in-the-Loop messages stay visible to all). The organizer check is cached per competition so a long
+  list does not cost a query per row.
+- **Page:** a failed row shows a coloured label with the type (explanation on hover) instead of the "?" tooltip;
+  clicking the row opens the submission window on a new **ERROR** tab (for failed submissions only) with the title, the
+  explanation, why there may be no logs, and for organizers the technical details with a Copy button. The logs tab says
+  why it is empty instead of a bare "No logs available".
+- **Stuck submissions (configurable):** a submission still `Running` more than `SUBMISSION_STALE_GRACE_MINUTES` (default
+  **30**, was 24 hours) after the execution time limit of its phase is failed as a platform error with an explanation;
+  the check runs every `SUBMISSION_CLEANUP_INTERVAL_SECONDS` (default **300**, was 3600). Only `Running` submissions are
+  covered, as before; ones stuck in other states (for example Preparing or Scoring) are not.
+- **Needs:** migration 0066 (runs when the django container starts), `docker compose restart compute_worker`, front-end
+  rebuild, `ASSET_VERSION` bump. Optional `.env`: the two settings above.
+- **Not done (proposed):** platform failures not counting against the submission limits, automatic re-queue, notifying
+  organizers. Free disk space on the server is the real fix for submission 2.
+- **Verified:** Python compiled, tag markup checked for balance, code read back. Not run or tested in a browser.
+
+### 24. Backup script and the full-disk problem
+- **Investigation (no change):** the server disk is **16 GB** (13 GB used, 2.5 GB free). Docker uses about 5 GB, the project
+  1.2 GB (`var/minio` 604 MB, `var/log` 268 MB, `var/postgres` 71 MB), `/var/backups/codabench` 1.2 GB; the rest was not
+  measured yet. `docker builder prune` freed only 43 MB. `codalab/codalab-legacy:py37` (used by all 13 competitions) is
+  not present yet and needs several GB, so its pull fails again unless space is freed. `/home/didimitrov/codabench` no
+  longer exists, the project is `codabench-su`.
+- **Files:** `codabench-backup.sh`
+- **What (decided by the owner: "smaller backup retention"):**
+  - The default project folder is now `/home/didimitrov/codabench-su`; every setting can be overridden from the environment.
+  - The database dump is still taken on every run (it is about 120 KB) and kept 30 days (`RETENTION_DAYS_DB`).
+  - The MinIO archive (as large as `var/minio`, about 600 MB) is taken once a week (Sunday, `MINIO_BACKUP_DAY`) or when no
+    archive exists, and only the newest 2 are kept (`MINIO_KEEP`). `FORCE_MINIO_BACKUP=1` takes it on demand.
+  - Before archiving it checks the free space (the archive size plus `MIN_FREE_MB`, default 2048); if there is not enough
+    it skips the archive with a WARNING and ends with exit code 3, instead of filling the disk.
+  - Temporary files are removed when a run fails, and leftover `*.tmp` files older than a day are removed (the 33
+    empty files from the broken nightly runs).
+- **Not done:** a disk-usage alert (the owner does not want it), a bigger disk (the owner is not sure it is possible),
+  smaller Docker image for the competitions, Caddy access-log size limit (proposed: `roll_size` is 5000 MiB).
+- **Needs:** copy the script to the server (`/usr/local/bin/codabench-backup`) and use the crontab line from its header.
+- **Verified:** read back by hand only, not run.
+
+### 25. Caddy access log size
+- **Files:** `Caddyfile`
+- **What:** the access log (`var/log/caddy/caddyaccess.log` on the host) was rotated at 5000 MiB per file with Caddy's default of 10
+  files kept, which could fill a 16 GB disk. It now rotates at **100 MiB** (the owner chose 100 rather than 20) and keeps
+  the **5** newest rotated files (about 600 MiB at most).
+- **Needs:** `docker compose restart caddy` (the Caddyfile is mounted into the container). The existing 268 MiB file is
+  above the new limit, so it is rotated on the next write.
+- **Verified:** read back only.
+
 ---
 
 ## 3. Things that were looked at and deliberately NOT changed
@@ -227,6 +355,10 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 3. `.env`: real SMTP (`EMAIL_BACKEND=...smtp.EmailBackend`, host, port, user, password, `EMAIL_USE_TLS`), `DEFAULT_FROM_EMAIL`
    and `SERVER_EMAIL` on an address the university SMTP accepts; optionally lower `EMAIL_BULK_BATCH_SIZE`.
 4. Migrations (`profiles/0026`) run on container start.
+4a. Optional `.env`: `SUBMISSION_STALE_GRACE_MINUTES` (default 30) and `SUBMISSION_CLEANUP_INTERVAL_SECONDS` (default 300).
+   After the update also run `docker compose restart compute_worker` (the worker code changed).
+4b. Set `ASSET_VERSION` in `.env` (any new value at every deploy, e.g. the date) and recreate with `docker compose up -d`,
+   so participants' browsers do not keep old JavaScript/CSS.
 5. **Run `sync_task9_participants --dry-run`, then for real, once right after deploy.**
 6. Check `TASK9_COMPETITION_IDS` matches the real competition ids on the server.
 7. Users without a team name show `N/A` on the leaderboard; tell them to fill it in on their profile.

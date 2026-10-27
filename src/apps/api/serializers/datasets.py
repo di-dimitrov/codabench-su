@@ -56,7 +56,7 @@ class DataSerializer(DefaultUserCreateMixin, serializers.ModelSerializer):
 
         # Validate file type
         request_sassy_file_name = attrs.get('request_sassy_file_name')
-        if request_sassy_file_name and not request_sassy_file_name.endswith('.zip'):
+        if request_sassy_file_name and not request_sassy_file_name.lower().endswith('.zip'):
             raise ValidationError("Only zip files are allowed!")
 
         return attrs

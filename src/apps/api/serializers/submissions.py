@@ -31,6 +31,8 @@ class SubmissionSerializer(serializers.ModelSerializer):
     auto_run = serializers.SerializerMethodField(read_only=True)
     can_make_submissions_public = serializers.SerializerMethodField(read_only=True)
     participant_group_name = serializers.SerializerMethodField(read_only=True)
+    failure_title = serializers.SerializerMethodField(read_only=True)
+    failure_message = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Submission
@@ -44,6 +46,9 @@ class SubmissionSerializer(serializers.ModelSerializer):
             'is_specific_task_re_run',
             'status',
             'status_details',
+            'failure_type',
+            'failure_title',
+            'failure_message',
             'owner',
             'has_children',
             'parent',
@@ -69,6 +74,35 @@ class SubmissionSerializer(serializers.ModelSerializer):
             'leaderboard',
             'on_leaderboard',
         )
+
+    def get_failure_title(self, instance):
+        return instance.failure_summary()[0] if instance.status == Submission.FAILED else None
+
+    def get_failure_message(self, instance):
+        return instance.failure_summary()[1] if instance.status == Submission.FAILED else None
+
+    def _viewer_is_organizer(self, instance):
+        # A list holds the submissions of few competitions, so remember the answer instead of asking for every row
+        user = self.context['request'].user
+        cache = self.context.setdefault('_organizer_by_competition', {})
+        key = (instance.phase.competition_id, user.pk)
+        if key not in cache:
+            cache[key] = instance.phase.competition.user_has_admin_permission(user)
+        return cache[key]
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        # `status_details` of a failed submission can hold tracebacks, host names or paths, which only organizers get.
+        # Everyone else gets the plain explanation (`failure_message`). The Human in the Loop messages are meant for all.
+        details = representation.get('status_details')
+        if (
+            instance.status == Submission.FAILED
+            and details
+            and 'Human in the Loop' not in details
+            and not self._viewer_is_organizer(instance)
+        ):
+            representation['status_details'] = instance.failure_summary()[1]
+        return representation
 
     def get_filename(self, instance):
         if instance.data and instance.data.data_file:
@@ -129,6 +163,7 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
             'phase',
             'status',
             'status_details',
+            'failure_type',
             'filename',
             'description',
             'secret',
@@ -223,6 +258,10 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
         # Task of a submission cannot be updated
         if "task" in validated_data:
             raise PermissionDenied("Task of a submission cannot be update")
+
+        # A submission that is not failed has no failure type (it may have failed before and been started again)
+        if validated_data.get("status") and validated_data["status"] != Submission.FAILED:
+            validated_data["failure_type"] = None
 
         # Update status if it is there in validated data
         if "status" in validated_data:

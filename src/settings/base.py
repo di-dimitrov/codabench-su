@@ -247,6 +247,12 @@ CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL", "redis://redis:6379")
 CELERY_IGNORE_RESULT = False      # Ensure that Celery tracks the state
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_ACCEPT_CONTENT = ('json',)
+# Stuck submissions: one that is still Running this many minutes after the execution time limit of its phase is
+# failed as a platform error (its compute worker most likely stopped responding), and this is how often (in seconds)
+# the check runs. This used to be 24 hours after the time limit, checked once an hour.
+SUBMISSION_STALE_GRACE_MINUTES = int(os.environ.get('SUBMISSION_STALE_GRACE_MINUTES') or 30)
+SUBMISSION_CLEANUP_INTERVAL_SECONDS = int(os.environ.get('SUBMISSION_CLEANUP_INTERVAL_SECONDS') or 300)
+
 CELERY_BEAT_SCHEDULE = {
     'do_phase_migrations': {
         'task': 'competitions.tasks.do_phase_migrations',
@@ -258,7 +264,7 @@ CELERY_BEAT_SCHEDULE = {
     },
     'submission_status_cleanup': {
         'task': 'competitions.tasks.submission_status_cleanup',
-        'schedule': timedelta(seconds=3600)
+        'schedule': timedelta(seconds=SUBMISSION_CLEANUP_INTERVAL_SECONDS)
     },
     'create_storage_analytics_snapshot': {
         'task': 'analytics.tasks.create_storage_analytics_snapshot',
@@ -478,6 +484,11 @@ if STORAGE_IS_GCS:
                                                              "should point to (edit in .env)"
 
 FILE_UPLOAD_HANDLERS = ("django.core.files.uploadhandler.TemporaryFileUploadHandler",)
+
+# Cache busting for the static files: every static URL gets `?v=<ASSET_VERSION>` (see utils.static_storage).
+# Change the value in `.env` at each deploy so browsers fetch the new JavaScript/CSS instead of their old copy.
+ASSET_VERSION = os.environ.get('ASSET_VERSION', '1')
+STORAGES["staticfiles"] = {"BACKEND": "utils.static_storage.VersionedStaticFilesStorage"}
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')

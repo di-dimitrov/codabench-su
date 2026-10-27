@@ -1,9 +1,38 @@
 <submission-modal>
     <div class="ui large green pointing menu">
+        <div class="submission-modal item" data-tab="{admin_: submission.admin}error" show="{submission.status === 'Failed'}">ERROR</div>
         <div class="active submission-modal item" data-tab="{admin_: submission.admin}downloads">DOWNLOADS</div>
         <div class="submission-modal item" data-tab="{admin_: submission.admin}logs" show="{!opts.hide_output}">LOGS</div>
         <div class="submission-modal item" data-tab="{admin_: submission.admin}graph" show="{!opts.hide_output && opts.show_visualization}">VISUALIZATION</div>
         <div class="submission-modal item" data-tab="{admin_: submission.admin}fact_sheet">FACT SHEET ANSWERS</div>
+    </div>
+    <!-- Error: why the submission failed -->
+    <div class="ui tab modal-tab" data-tab="{admin_: submission.admin}error" if="{submission.status === 'Failed'}">
+        <div class="ui relaxed centered grid">
+            <div class="ui fifteen wide column">
+                <div class="ui icon {failure_color()} message">
+                    <i class="{failure_icon()} icon"></i>
+                    <div class="content">
+                        <div class="header">{ submission.failure_title || 'Failed' }</div>
+                        <p>{ submission.failure_message || 'The submission failed. Check the logs for details.' }</p>
+                        <p if="{logTabs.length === 0}"><em>{ no_logs_message() }</em></p>
+                    </div>
+                </div>
+                <div if="{submission.admin && submission.status_details}">
+                    <h4 class="ui header">
+                        Technical details
+                        <div class="sub header">Only organizers can see this. It is what the compute worker reported.</div>
+                    </h4>
+                    <pre class="technical-details">{ submission.status_details }</pre>
+                    <button type="button" class="ui mini basic button" onclick="{ copy_details }">
+                        <i class="copy icon"></i> Copy
+                    </button>
+                </div>
+                <p if="{!submission.admin}">
+                    If you need help, contact the organizers and give them the submission ID ({ submission.id }).
+                </p>
+            </div>
+        </div>
     </div>
     <!-- Downloads -->
     <div class="ui tab active modal-tab" data-tab="{admin_: submission.admin}downloads">
@@ -48,7 +77,7 @@
         </div>
         <!-- If no logs -->
         <div class="ui bottom attached inverted segment tab log active" if="{logTabs.length === 0}">
-            <pre class="empty">No logs available for this submission.</pre>
+            <pre class="empty">{ no_logs_message() }</pre>
         </div>
         <!-- Dynamic tabs -->
         <div each="{tab, i in logTabs}"
@@ -94,6 +123,45 @@
         self.is_empty = (v) => {
             v = self.normalizeLog(v)
             return v == null || (typeof v === "string" && v.trim().length === 0)
+        }
+
+        // Failed submissions: the colour and icon of the explanation, and why there may be no logs
+        self.failure_color = () => ({
+            platform: 'orange',
+            submission: 'red',
+            program: 'red',
+            scoring: 'purple',
+            time_limit: 'yellow',
+        }[self.submission.failure_type] || 'red')
+
+        self.failure_icon = () => ({
+            platform: 'server',
+            submission: 'file archive outline',
+            program: 'bug',
+            scoring: 'calculator',
+            time_limit: 'clock outline',
+        }[self.submission.failure_type] || 'exclamation circle')
+
+        self.no_logs_message = () => {
+            if (self.submission.status !== 'Failed') {
+                return "No logs available for this submission."
+            }
+            if (self.submission.failure_type === 'platform') {
+                return "No logs were produced: the problem happened on the platform before your program could run or " +
+                    "finish, so there was nothing to record."
+            }
+            return "No logs were produced for this submission."
+        }
+
+        self.copy_details = () => {
+            const text = self.submission.status_details || ''
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text)
+                    .then(() => toastr.success('Copied'))
+                    .catch(() => toastr.error('Could not copy, select the text and copy it by hand'))
+            } else {
+                toastr.error('Could not copy, select the text and copy it by hand')
+            }
         }
 
         // Dynamic tabs state
@@ -213,7 +281,8 @@
             // update
             self.update()
             self.update_submission_details()
-            let path = self.submission.admin ? 'admin_downloads' : 'downloads'
+            let tab = self.submission.status === 'Failed' ? 'error' : 'downloads'
+            let path = self.submission.admin ? 'admin_' + tab : tab
             $('.ui.large.green.pointing.menu .submission-modal.item').tab('change tab', path)
         })
     </script>
@@ -242,6 +311,15 @@
 
         pre.empty 
             opacity 0.7 
+
+        pre.technical-details
+            background #1b1c1d
+            color white
+            padding 1em
+            max-height 260px
+            overflow auto
+            white-space pre-wrap
+            word-break break-word
 
         .log
             color white

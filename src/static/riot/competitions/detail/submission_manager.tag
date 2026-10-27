@@ -146,9 +146,17 @@
                 <td>{ pretty_date(submission.created_when) }</td>
                 <td class="right aligned collapsing">
                     { submission.status }
-                    <sup data-tooltip="{submission.status_details}">
-                        <i if="{submission.status === 'Failed' && !is_hitl_failure(submission)}" class="failed question circle icon"></i>
-                        <i if="{submission.status === 'Failed' && is_hitl_failure(submission)}" class="orange lock icon"></i>
+                    <!-- Why it failed: a label with the type, the explanation on hover. All the details are in the
+                         ERROR tab that opens when the row is clicked -->
+                    <span if="{ submission.status === 'Failed' && !is_hitl_failure(submission) }"
+                          class="ui mini { failure_color(submission) } label"
+                          data-tooltip="{ submission.failure_message } Click the row for details."
+                          data-inverted="" data-position="left center">
+                        { submission.failure_title || 'Error' }
+                    </span>
+                    <sup if="{ submission.status === 'Failed' && is_hitl_failure(submission) }"
+                         data-tooltip="{ submission.status_details }">
+                        <i class="orange lock icon"></i>
                     </sup>
                     <sup if="{ pending_info(submission) }"
                         data-tooltip="{ pending_info(submission).message }" data-inverted="">
@@ -287,7 +295,15 @@
                                 <td if="{ has_multiple_tasks(submission) }">{ child.task ? child.task.name : '' }</td>
                                 <td>{ child.participant_group_name || '-' }</td>
                                 <td>{ pretty_date(child.created_when) }</td>
-                                <td>{ child.status }</td>
+                                <td>
+                                    { child.status }
+                                    <span if="{ child.status === 'Failed' && !is_hitl_failure(child) }"
+                                          class="ui mini { failure_color(child) } label"
+                                          data-tooltip="{ child.failure_message } Click the row for details."
+                                          data-inverted="" data-position="left center">
+                                        { child.failure_title || 'Error' }
+                                    </span>
+                                </td>
                                 <td>{ get_score(child) }</td>
 
                                 <td if="{ child.is_soft_deleted }">
@@ -540,6 +556,17 @@
             self.show_is_soft_deleted = !self.show_is_soft_deleted
             self.update_submissions()
             self.update()
+        }
+
+        // Colour of the label that says why a submission failed
+        self.failure_color = function (submission) {
+            return {
+                platform: 'orange',
+                submission: 'red',
+                program: 'red',
+                scoring: 'purple',
+                time_limit: 'yellow',
+            }[submission.failure_type] || 'grey'
         }
 
         self.is_hitl_failure = function (submission) {
