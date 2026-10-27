@@ -119,7 +119,9 @@ class Settings:
     HUMAN_IN_THE_LOOP = (
         get("HUMAN_IN_THE_LOOP", "false").lower() == "true"
     )
-    COMPETITION_ALLOW_IMAGE_PULL = to_bool(get("COMPETITION_ALLOW_IMAGE_PULL", "True"))
+    # False by default: the images of the competitions are pulled once by the administrator of the host
+    # (`docker pull <image>`), not before every submission. Set it to True to pull before every run again.
+    COMPETITION_ALLOW_IMAGE_PULL = to_bool(get("COMPETITION_ALLOW_IMAGE_PULL", "False"))
 
     COMPUTE_WORKER_DISABLE_LOG_UPLOAD = to_bool(get("COMPUTE_WORKER_DISABLE_LOG_UPLOAD", "False"))
     COMPUTE_WORKER_DISABLE_PREDICTION_UPLOAD = to_bool(get("COMPUTE_WORKER_DISABLE_PREDICTION_UPLOAD", "False"))
@@ -883,7 +885,11 @@ class Run:
                     "Docker_Image_Pull_Fail",
                     "COMPETITION_ALLOW_IMAGE_PULL set to False but image is not present locally",
                 )
-                raise DockerImagePullException(f"Pull for {image_name} failed! COMPETITION_ALLOW_IMAGE_PULL is set to False, make sure the image is available locally")
+                raise DockerImagePullException(
+                    f"Docker image '{image_name}' is not available on this compute worker, and pulling images is switched "
+                    f"off (COMPETITION_ALLOW_IMAGE_PULL=False). The administrator must pull it once on the host: "
+                    f"docker pull {image_name}"
+                )
 
 
     async def _send_data_through_socket(self, error_message):

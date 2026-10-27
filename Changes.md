@@ -41,7 +41,8 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 | 22 | 2026-10-27 | Failed submissions | Docker pull failure is reported reliably and its log is created | uncommitted |
 | 23 | 2026-10-27 | Failed submissions | Failure types, ERROR tab, organizer-only details, configurable stuck-submission cleanup | uncommitted |
 | 24 | 2026-10-27 | Backups / disk | Backup script: weekly MinIO archive, small retention, free-space check, correct path | uncommitted |
-| 25 | 2026-10-27 | Disk | Caddy access log rotates at 100 MiB, 5 files kept | uncommitted |
+| 25 | 2026-10-27 | Disk | Caddy access log rotates at 100 MiB, 5 files kept | committed (f6453642) |
+| 26 | 2026-10-27 | Compute worker | Docker images are no longer pulled before every submission | uncommitted |
 
 ---
 
@@ -339,6 +340,20 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
   above the new limit, so it is rotated on the next write.
 - **Verified:** read back only.
 
+### 26. No Docker pull before every submission
+- **Files:** `compute_worker/compute_worker.py`, `.env_sample` (and the owner's local, untracked `.env`)
+- **Why:** before each run the worker contacted the registry (`client.pull`), even when the image was already on the host.
+  That needs internet, can hit Docker Hub rate limits and made a full disk or a network problem fail the submission
+  (submission 2). All 12 competitions use the same image (`codalab/codalab-legacy:py37`), stored once on the host.
+- **What:** `COMPETITION_ALLOW_IMAGE_PULL` now defaults to **False** (it was True): the worker uses the image on the host and
+  the administrator pulls it once. A missing image fails the submission with a clear message ("The administrator must pull
+  it once on the host: docker pull <image>"; reported as a platform failure). `.env_sample` documents the setting
+  (`COMPETITION_ALLOW_IMAGE_PULL=False`) and the same line was added to the local `.env`.
+- **Needs (manual, on the server):** add `COMPETITION_ALLOW_IMAGE_PULL=False` to the server's `.env` (it is not in git) and pull the
+  image **once**: `docker pull codalab/codalab-legacy:py37` (needs several GB of free disk). Pull again whenever an image
+  is changed or a competition is set to a different image. Restart the compute worker.
+- **Verified:** compiled and read back only.
+
 ---
 
 ## 3. Things that were looked at and deliberately NOT changed
@@ -355,6 +370,8 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 3. `.env`: real SMTP (`EMAIL_BACKEND=...smtp.EmailBackend`, host, port, user, password, `EMAIL_USE_TLS`), `DEFAULT_FROM_EMAIL`
    and `SERVER_EMAIL` on an address the university SMTP accepts; optionally lower `EMAIL_BULK_BATCH_SIZE`.
 4. Migrations (`profiles/0026`) run on container start.
+4c. Compute worker images are not pulled per submission any more: put `COMPETITION_ALLOW_IMAGE_PULL=False` in the server's
+   `.env` and pull the image once by hand (`docker pull codalab/codalab-legacy:py37`, needs several GB of free disk).
 4a. Optional `.env`: `SUBMISSION_STALE_GRACE_MINUTES` (default 30) and `SUBMISSION_CLEANUP_INTERVAL_SECONDS` (default 300).
    After the update also run `docker compose restart compute_worker` (the worker code changed).
 4b. Set `ASSET_VERSION` in `.env` (any new value at every deploy, e.g. the date) and recreate with `docker compose up -d`,
