@@ -404,12 +404,23 @@ def run_wrapper(run_args):
                 msg = "Submission failed. Contact the Organizer(s) for more details."
             else:
                 msg = "Submission failed. See logs for more details."
+        # The message above sends people to the logs, but a failure before a program ran leaves them empty: put the
+        # reason in the log of the stage (unless the organizers switched log upload off)
+        if str(e).strip() and not Settings.COMPUTE_WORKER_DISABLE_LOG_UPLOAD:
+            run._report_error("Submission_Failure", f"Submission failed: {str(e).strip()}")
         run._update_status(SubmissionStatus.FAILED, extra_information=msg, failure_type=e.failure_type)
         raise
 
     except Exception:
         # Anything not foreseen is a problem of the platform, not of the submission. The traceback goes to the
-        # organizers only (the website hides `status_details` of failed submissions from everyone else).
+        # organizers only (the website hides `status_details` of failed submissions from everyone else), the log gets
+        # a short note instead of it.
+        if not Settings.COMPUTE_WORKER_DISABLE_LOG_UPLOAD:
+            run._report_error(
+                "Submission_Failure",
+                "An unexpected error happened on the platform while running this submission. "
+                "The organizers can see the technical details.",
+            )
         run._update_status(
             SubmissionStatus.FAILED, extra_information=traceback.format_exc(), failure_type=FailureType.PLATFORM)
         raise
@@ -982,9 +993,20 @@ class Run:
                 break  # Break if the loop is successful
             except BadZipFile:
                 retries += 1
+                size = os.path.getsize(bundle_file) if os.path.exists(bundle_file) else 0
+                logger.warning(f"The {destination} bundle ({size} bytes) is not a valid zip archive: {url.split('?')[0]}")
                 if retries >= max_retries:
-                    raise SubmissionException("Bad or empty zip file", failure_type=self._content_failure_type())
+                    raise SubmissionException(
+                        f"Bad or empty zip file: the file for '{destination}' is {size} bytes and is not a valid zip "
+                        f"archive. Upload it again as a zip (its files at the top level of the archive).",
+                        failure_type=self._content_failure_type(),
+                    )
                 else:
+                    # A bad copy in the cache would be opened again and fail again, so remove it: the next try
+                    # downloads it again (a download that was cut off, or made while the disk was full)
+                    if cache and os.path.exists(bundle_file):
+                        os.remove(bundle_file)
+                        download_needed = True
                     logger.warning("Failed. Retrying in 20 seconds...")
                     time.sleep(20)  # Wait 20 seconds before retrying
         # Return the zip file path for other uses, e.g. for creating a MD5 hash to identify it

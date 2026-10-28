@@ -44,6 +44,9 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 | 25 | 2026-10-27 | Disk | Caddy access log rotates at 100 MiB, 5 files kept | committed (f6453642) |
 | 26 | 2026-10-27 | Compute worker | Docker images are no longer pulled before every submission | uncommitted |
 | 27 | 2026-10-27 | Task 9 phases | `sync_task9_phases` copies dates and limits from a master competition to the others | uncommitted |
+| 28 | 2026-10-28 | Failed submissions | Organizers see the technical details (bug fix); the reason of a failure is written into the logs | uncommitted |
+| 30 | 2026-10-28 | Submissions UI | Drag & drop: a dropped file no longer opens in the browser (native window listeners) | uncommitted |
+| 29 | 2026-10-28 | Compute worker | "Bad or empty zip file": a bad cached bundle is re-downloaded; the message names the file and its size | uncommitted |
 
 ---
 
@@ -364,14 +367,60 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
   - Copies from the master to the other competitions of the group (`TASK9_COMPETITION_IDS`), matching phases by index. It never
     creates or deletes phases and reports (and skips) a competition that lacks a phase of the master.
   - Default fields: `start`, `end`, `execution_time_limit`, `has_max_submissions`, `max_submissions_per_day`,
-    `max_submissions_per_person`. Optional via `--fields`: `hide_output`, `hide_prediction_output`, `hide_score_output`,
-    `auto_migrate_to_this_phase`. Names, descriptions, tasks, leaderboards and files can NOT be copied (they differ per competition).
+    `max_submissions_per_person`. Optional via `--fields` (replaces the default list): `is_final_phase`,
+    `auto_migrate_to_this_phase`, `hide_output`, `hide_prediction_output`, `hide_score_output`, `public_data`,
+    `starting_kit` (the last two make the other phases use the very same dataset record; the preview shows the file
+    names). `--fields all` selects every one of these fields. Names, descriptions, tasks, leaderboards and `has_been_migrated` (system state) can NOT be copied.
   - **Preview by default**: it lists every old and new value per competition and phase and writes nothing until `--apply`
     is added. The write is one transaction (all or nothing) and uses queryset updates; afterwards each changed
     competition's phase statuses are recomputed (instead of waiting for the hourly job).
 - **Before the first real run:** set the master's phase 0 end the way you want it (it is 2026-10-31 00:00 UTC in competition 3, the
   start of the day, while the other phases end at 23:59), because that value will be copied to all 11 others.
 - **Verified:** compiled and read back only, not run.
+
+### 28. Failed submission 6: technical details for organizers, and the reason of a failure in the logs
+- **Problem seen:** submission 6 showed "Scoring error" with "No logs were produced", the downloaded logs were empty, and
+  the organizer did not see the technical details.
+- **Bug in my entry 23:** the ERROR tab decided "organizer" from `submission.admin`, which the manager never sets (the old admin-only
+  tab names built from it never took effect either), so nobody ever saw the technical details. The manager now passes its own
+  `admin` option to both `<submission-modal>` usages and the tab uses `opts.admin`.
+- **Empty logs:** the worker only uploads stdout/stderr of programs that ran and printed something, while the status text
+  says "See logs for more details". For a failure before a program ran (missing `metadata.yaml`, bad zip, ...) there was nothing.
+  Now the worker also reports the reason (`type=Submission_Failure`) for every `SubmissionException` ("Submission failed:
+  <reason>") and, for an unforeseen error, a short note without the traceback. The server writes it to the stage's log
+  (`scoring_stderr` or `prediction_ingestion_stderr`, created if missing, appended otherwise) through the existing
+  error-log helper. Nothing is written when `COMPUTE_WORKER_DISABLE_LOG_UPLOAD` is on.
+- **Files:** `src/static/riot/competitions/detail/submission_manager.tag`, `src/static/riot/competitions/detail/submission_modal.tag`,
+  `src/apps/api/views/submissions.py`, `compute_worker/compute_worker.py`
+- **Needs:** front-end rebuild and `ASSET_VERSION` bump; `docker compose restart compute_worker`. It only affects submissions run after that.
+- **Verified:** compiled and read back only.
+
+### 29. "Bad or empty zip file": bad cached bundles were never downloaded again
+- **Problem seen:** a submission failed with "Submission failed: Bad or empty zip file".
+- **Cause in the code:** `_get_bundle` keeps a cache of downloaded bundles on the host (`CACHE_DIR/<hash of the url>`) and only downloads when the
+  cached file does not exist. That decision was made once, before the retry loop, so when the file was bad (cut off, 0 bytes, for example
+  a download made while the disk was full) the 10 retries (20 seconds apart) opened the same bad file again. A bad cache entry stayed
+  bad until the cache was emptied by hand.
+- **Fix** (`compute_worker/compute_worker.py`): on `BadZipFile` a cached copy is deleted and the next try downloads it again. The final
+  message now says which file and how big it is ("the file for '<destination>' is N bytes and is not a valid zip archive. Upload it
+  again as a zip (its files at the top level of the archive)"); the URL is only written to the worker log. Without the cache the
+  behaviour is unchanged (every try downloads).
+- **Needs:** `docker compose restart compute_worker`. A bad file already in the cache is replaced by the next try.
+- **Verified:** compiled and read back only.
+
+### 30. Drag & drop opened the file in the browser
+- **Problem seen:** dropping a file on the submission form made the browser open the file instead of attaching it.
+- **Cause:** a browser opens a dropped file unless the `dragover` and `drop` events are cancelled. In entry 20 that depended on Riot's
+  `ondragover`/`ondrop` attributes on the zone, which only cancel the default after the handler has finished without an error, and only for a drop exactly on
+  the zone. A drop that missed the zone, an error in a handler, or an old cached bundle (the old UI has no drop handling at all) all end
+  in the browser opening the file.
+- **Fix** (`src/static/riot/forms/input-file.tag`, drop zone mode only): the Riot drag attributes are gone. Native listeners on the
+  window (capture phase) cancel `dragover`/`drop` for file drags first thing, so the browser can never leave the page. A file dropped
+  anywhere on the page while the zone is on screen is treated as dropped on the zone (the zone is highlighted while a file is dragged
+  over the page); when the zone is hidden (another tab) the drop is just ignored. The listeners are removed when the component
+  goes away. The checks (one file, no folder, `.zip`, zip signature) and the Submit button are unchanged.
+- **Needs:** front-end rebuild and an `ASSET_VERSION` bump, otherwise the old bundle keeps running.
+- **Verified:** the JavaScript of the tag was syntax-checked with a parser and the markup checked for balance; it was NOT run in a browser.
 
 ---
 

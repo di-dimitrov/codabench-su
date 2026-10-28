@@ -58,9 +58,10 @@ class SubmissionViewSet(ModelViewSet):
             # check if type is in request data. type can have the following values
             # - Docker_Image_Pull_Fail
             # - Execution_Time_Limit_Exceeded
+            # - Submission_Failure (the reason a submission failed, so the logs are never empty for a failure)
             if "type" in self.request.data.keys():
 
-                if request.data["type"] in ["Docker_Image_Pull_Fail", "Execution_Time_Limit_Exceeded"]:
+                if request.data["type"] in ["Docker_Image_Pull_Fail", "Execution_Time_Limit_Exceeded", "Submission_Failure"]:
 
                     # Get the error message
                     error_message = str(request.data.get('error_message', ''))

@@ -24,11 +24,7 @@
              tabindex="0"
              role="button"
              onclick="{ browse }"
-             onkeydown="{ key_browse }"
-             ondragenter="{ drag_over }"
-             ondragover="{ drag_over }"
-             ondragleave="{ drag_leave }"
-             ondrop="{ dropped }">
+             onkeydown="{ key_browse }">
             <virtual if="{ !file }">
                 <i class="cloud upload icon"></i>
                 <div class="drop-title">Drag &amp; drop your .zip file here</div>
@@ -68,6 +64,10 @@
                     self.refs.file_input.value = ''
                     self.handle_files(files)
                 })
+                // Capture phase, so nothing on the page can stop these events before we see them
+                window.addEventListener('dragover', self.on_window_dragover, true)
+                window.addEventListener('dragleave', self.on_window_dragleave, true)
+                window.addEventListener('drop', self.on_window_drop, true)
                 return
             }
 
@@ -113,22 +113,65 @@
             return true
         }
 
-        self.drag_over = function () {
-            self.dragging = true
+        /*
+         Dropping a file on a page makes the browser open the file, unless the 'dragover' and 'drop' events are
+         cancelled first. That is done here, on the whole window and before anything else, so even a drop that misses
+         the zone (or an error further down) can never make the browser leave the page. A file that is dropped
+         anywhere on the page while the zone is on screen is taken as dropped on the zone.
+        */
+        self.has_files = function (event) {
+            var types = event.dataTransfer && event.dataTransfer.types
+            return !!types && Array.prototype.indexOf.call(types, 'Files') !== -1
         }
 
-        self.drag_leave = function (event) {
-            // Moving over the content of the zone also fires 'dragleave'; only react when really leaving it
-            if (event.currentTarget.contains(event.relatedTarget)) {
+        // offsetParent is null when the zone, or something around it such as another tab, is hidden
+        self.zone_is_visible = function () {
+            return !!self.root.offsetParent
+        }
+
+        self.on_window_dragover = function (event) {
+            if (!self.has_files(event)) {
                 return
             }
-            self.dragging = false
+            event.preventDefault()
+            try {
+                event.dataTransfer.dropEffect = 'copy'
+            } catch (error) {
+                // not every browser lets this be set, the drop still works
+            }
+            if (self.zone_is_visible() && !self.dragging) {
+                self.dragging = true
+                self.update()
+            }
         }
 
-        self.dropped = function (event) {
+        self.on_window_dragleave = function (event) {
+            // Only when the pointer leaves the browser window; moving between elements also fires 'dragleave'
+            if (self.dragging && event.relatedTarget === null) {
+                self.dragging = false
+                self.update()
+            }
+        }
+
+        self.on_window_drop = function (event) {
+            if (!self.has_files(event)) {
+                return
+            }
+            event.preventDefault()
             self.dragging = false
-            var transfer = event.dataTransfer
-            // Folders have to be recognised now, the dropped items are not available once this handler returns
+            try {
+                if (self.zone_is_visible()) {
+                    self.take_dropped(event.dataTransfer)
+                }
+            } catch (error) {
+                console.error(error)
+                self.refuse('The dropped file could not be read: ' + error.message)
+            }
+            self.update()
+        }
+
+        self.take_dropped = function (transfer) {
+            // Folders have to be recognised now, the dropped items are not available once the event is over
             var dropped_folder = _.some(transfer.items || [], function (item) {
                 var entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null
                 return entry && entry.isDirectory
@@ -139,6 +182,12 @@
             }
             self.handle_files(Array.from(transfer.files))
         }
+
+        self.on('unmount', function () {
+            window.removeEventListener('dragover', self.on_window_dragover, true)
+            window.removeEventListener('dragleave', self.on_window_dragleave, true)
+            window.removeEventListener('drop', self.on_window_drop, true)
+        })
 
         self.remove = function (event) {
             // The button is inside the drop zone, do not open the file browser as well

@@ -18,7 +18,7 @@
                         <p if="{logTabs.length === 0}"><em>{ no_logs_message() }</em></p>
                     </div>
                 </div>
-                <div if="{submission.admin && submission.status_details}">
+                <div if="{opts.admin && submission.status_details}">
                     <h4 class="ui header">
                         Technical details
                         <div class="sub header">Only organizers can see this. It is what the compute worker reported.</div>
@@ -28,7 +28,7 @@
                         <i class="copy icon"></i> Copy
                     </button>
                 </div>
-                <p if="{!submission.admin}">
+                <p if="{!opts.admin}">
                     If you need help, contact the organizers and give them the submission ID ({ submission.id }).
                 </p>
             </div>
