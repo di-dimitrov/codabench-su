@@ -43,6 +43,7 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 | 24 | 2026-10-27 | Backups / disk | Backup script: weekly MinIO archive, small retention, free-space check, correct path | uncommitted |
 | 25 | 2026-10-27 | Disk | Caddy access log rotates at 100 MiB, 5 files kept | committed (f6453642) |
 | 26 | 2026-10-27 | Compute worker | Docker images are no longer pulled before every submission | uncommitted |
+| 27 | 2026-10-27 | Task 9 phases | `sync_task9_phases` copies dates and limits from a master competition to the others | uncommitted |
 
 ---
 
@@ -353,6 +354,24 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
   image **once**: `docker pull codalab/codalab-legacy:py37` (needs several GB of free disk). Pull again whenever an image
   is changed or a competition is set to a different image. Restart the compute worker.
 - **Verified:** compiled and read back only.
+
+### 27. `sync_task9_phases`: copy phase dates and limits from a master competition
+- **Files:** `src/apps/autoenroll/management/commands/sync_task9_phases.py` (new)
+- **Why:** the 12 Task 9 competitions (3-14) have the same three phases (index 0, 1, 2; checked in the database), so every
+  date or limit change had to be made 12 times by hand. Phase 0 had drifted: it ended at 00:00 in competitions 3 and 4 but
+  at 14:03, 14:04, 08:04 ... in the others.
+- **What (decided by the owner):** `manage.py sync_task9_phases --from <master id> [--fields a,b,c] [--apply]`.
+  - Copies from the master to the other competitions of the group (`TASK9_COMPETITION_IDS`), matching phases by index. It never
+    creates or deletes phases and reports (and skips) a competition that lacks a phase of the master.
+  - Default fields: `start`, `end`, `execution_time_limit`, `has_max_submissions`, `max_submissions_per_day`,
+    `max_submissions_per_person`. Optional via `--fields`: `hide_output`, `hide_prediction_output`, `hide_score_output`,
+    `auto_migrate_to_this_phase`. Names, descriptions, tasks, leaderboards and files can NOT be copied (they differ per competition).
+  - **Preview by default**: it lists every old and new value per competition and phase and writes nothing until `--apply`
+    is added. The write is one transaction (all or nothing) and uses queryset updates; afterwards each changed
+    competition's phase statuses are recomputed (instead of waiting for the hourly job).
+- **Before the first real run:** set the master's phase 0 end the way you want it (it is 2026-10-31 00:00 UTC in competition 3, the
+  start of the day, while the other phases end at 23:59), because that value will be copied to all 11 others.
+- **Verified:** compiled and read back only, not run.
 
 ---
 
