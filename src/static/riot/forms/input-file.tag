@@ -11,6 +11,8 @@
         <!-- Just showing the file after it is uploaded -->
         <input ref="file_input_display" readonly onclick="{ open_file_selection }">
     </div>
+    <!-- Why the chosen file was refused (only for fields that accept .zip files) -->
+    <div if="{ !opts.droppable && file_error }" class="ui red message">{ file_error }</div>
 
     <!--
         Drop zone mode (attribute droppable="true"): drag and drop or click to browse. The file is checked as soon as it
@@ -83,7 +85,36 @@
                     // file is selected!
                     self.refs.file_input.value = null
                 })
+                // Only zip archives can be used (the server and the compute worker refuse anything else): check the
+                // file as soon as it is chosen, instead of letting a scoring run fail on it later
+                .on('change', function () {
+                    var file = self.refs.file_input.files[0]
+                    self.file_error = null
+                    if (!file || !self.zip_required()) {
+                        self.update()
+                        return
+                    }
+                    self.check_file(file).then(function (error) {
+                        // Another file may have been chosen in the meantime
+                        if (self.refs.file_input.files[0] !== file) {
+                            return
+                        }
+                        if (error) {
+                            // Forget the file, so the form cannot upload it
+                            self.refs.file_input.value = ''
+                            self.refs.file_input_display.value = ''
+                            self.file_error = error
+                            toastr.error(error)
+                        }
+                        self.update()
+                    })
+                })
         })
+
+        // The field only takes zip archives when its accept attribute says so (every upload form in Codabench does)
+        self.zip_required = function () {
+            return (self.opts.accept || '').toLowerCase().indexOf('.zip') !== -1
+        }
 
         /*---------------------------------------------------------------------
          Methods
@@ -239,7 +270,7 @@
         // Resolves to a message when the file is refused, or to null when it can be used
         self.check_file = function (file) {
             if (!/\.zip$/i.test(file.name)) {
-                return Promise.resolve('"' + file.name + '" is not a .zip file. Only .zip files can be submitted.')
+                return Promise.resolve('"' + file.name + '" is not a .zip file. Only .zip files are accepted.')
             }
             if (file.size === 0) {
                 return Promise.resolve('"' + file.name + '" is empty.')

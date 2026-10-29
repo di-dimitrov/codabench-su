@@ -45,6 +45,9 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 | 26 | 2026-10-27 | Compute worker | Docker images are no longer pulled before every submission | uncommitted |
 | 27 | 2026-10-27 | Task 9 phases | `sync_task9_phases` copies dates and limits from a master competition to the others | uncommitted |
 | 28 | 2026-10-28 | Failed submissions | Organizers see the technical details (bug fix); the reason of a failure is written into the logs | uncommitted |
+| 33 | 2026-10-29 | Submissions UI | Error logs shown in red; failed submissions open on the error log | uncommitted |
+| 32 | 2026-10-29 | Upload forms | Zip check (name, size, zip signature) on every upload form, not only the submission drop zone | uncommitted |
+| 31 | 2026-10-29 | Task 9 leaderboards | `sync_task9_leaderboards` copies leaderboard settings and columns from a master competition | uncommitted |
 | 30 | 2026-10-28 | Submissions UI | Drag & drop: a dropped file no longer opens in the browser (native window listeners) | uncommitted |
 | 29 | 2026-10-28 | Compute worker | "Bad or empty zip file": a bad cached bundle is re-downloaded; the message names the file and its size | uncommitted |
 
@@ -421,6 +424,50 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
   goes away. The checks (one file, no folder, `.zip`, zip signature) and the Submit button are unchanged.
 - **Needs:** front-end rebuild and an `ASSET_VERSION` bump, otherwise the old bundle keeps running.
 - **Verified:** the JavaScript of the tag was syntax-checked with a parser and the markup checked for balance; it was NOT run in a browser.
+
+### 31. `sync_task9_leaderboards`: copy leaderboard settings from a master competition
+- **Files:** `src/apps/autoenroll/management/commands/sync_task9_leaderboards.py` (new)
+- **Why:** the 12 competitions need the same leaderboard (columns `micro_f1` and `macro_f1`, ranking by `micro_f1`, decided
+  by the owner), which otherwise has to be set up 12 times. Reference data and scoring programs are NOT copied (owner).
+- **What:** `manage.py sync_task9_leaderboards --from <master id> [--fields ...] [--delete-extra-columns] [--apply]`.
+  - Leaderboards are matched through the phases (leaderboard of phase N of the master -> leaderboard of phase N of each
+    other competition); a conflict (two target phases sharing a leaderboard that the master keeps separate) is reported
+    and skipped. Columns are matched by key. Leaderboards are never created or deleted; tasks are not touched.
+  - Settings (`--fields`, default = all except `title` and `key`; `all` = everything): `primary_column` (the ranking column,
+    copied by its key and pointed at that column's position in the target), `submission_rule`, `hidden`, `title`, `key`,
+    `columns` (create the master's missing columns with all their settings), `column_title`, `column_sorting`,
+    `column_index`, `column_precision`, `column_hidden`, `column_computation` (computation + computation_indexes).
+  - Columns the master does not have are only reported; `--delete-extra-columns` deletes them with their scores.
+  - Preview by default; `--apply` writes everything in one transaction.
+- **Note:** existing submissions get no scores in newly created columns; re-run them if needed.
+- **Verified:** read back only. Not compiled or run (the owner asked not to run anything on this machine).
+
+### 32. Zip check on every upload form (Resources, tasks, competition bundle)
+- **Why:** a reference data upload that was not a real zip was accepted and only failed at scoring time ("Bad or empty zip
+  file" for `input/ref`, submissions 6 and 10). The owner asked for the drop zone's check on these forms too.
+- **Files:** `src/static/riot/forms/input-file.tag` (default, non-drop-zone mode)
+- **What:** when a field's `accept` includes `.zip` (all Codabench upload forms: datasets/programs in Resources, the task
+  and dataset modals, resource submissions, competition bundle upload), the chosen file is checked as soon as it is
+  picked, with the same checks as the drop zone: `.zip` name (any case), not empty, zip signature in the first bytes.
+  A refused file is removed from the field and the reason is shown under it and as a toast, so the form cannot upload it.
+  The drop zone's message now says "Only .zip files are accepted" (was "... can be submitted").
+- **Limits:** the competition bundle page starts uploading as soon as a file is picked, so there the check can come too late
+  (the server still refuses non-`.zip` names). Files replaced through the Django admin are not checked.
+- **Needs:** front-end rebuild and `ASSET_VERSION` bump.
+- **Verified:** read back only, not run.
+
+### 33. Submission logs: errors in red, failed submissions open on the error log
+- **Files:** `src/static/riot/competitions/detail/submission_modal.tag`
+- **Why:** the owner found normal output and errors impossible to tell apart (submission 13 showed "Scoring output" first while the
+  reason was in "Scoring errors").
+- **What:** the stderr log tabs (Prediction errors, Ingestion errors, Scoring errors, Scoring ingestion errors) get a warning icon
+  and red text, and their content is shown in red; normal output stays white. A failed submission opens the LOGS tab on its
+  first error log.
+- **Needs:** front-end rebuild and `ASSET_VERSION` bump.
+- **Verified:** read back only, not run.
+- **Related, outside the repo:** the Task 9 scoring program (`D:\Projects\Semeval2027Framing\codabench_scoring_subtask1\score.py`, uploaded as
+  `scorer.zip`) no longer prints or reports anything about the reference data, and computes micro/macro F1 itself (same formulas as
+  the official scorer) because `codalab/codalab-legacy:py37` has a scikit-learn older than 0.22 (`zero_division` unsupported).
 
 ---
 

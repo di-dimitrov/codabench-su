@@ -69,10 +69,10 @@
     <div class="ui tab modal-tab" data-tab="{admin_: submission.admin}logs" hide="{opts.hide_output}">
         <div class="ui top attached inverted pointing menu" if="{logTabs.length > 0}" ref="log_tabs_menu">
             <div each="{tab, i in logTabs}"
-                class="submission-modal item {active: tab.fullTabId === activeLogTabId || (!activeLogTabId && i === 0)}"
+                class="submission-modal item {active: tab.fullTabId === activeLogTabId || (!activeLogTabId && i === 0)} {error-log: tab.is_error}"
                 data-tab="{tab.fullTabId}"
                 onclick="{() => activeLogTabId = tab.fullTabId}">
-                {tab.label}
+                <i if="{tab.is_error}" class="exclamation triangle icon"></i>{tab.label}
             </div>
         </div>
         <!-- If no logs -->
@@ -83,7 +83,7 @@
         <div each="{tab, i in logTabs}"
             class="ui bottom attached inverted segment tab log {active: tab.fullTabId === activeLogTabId || (!activeLogTabId && i === 0)}"
             data-tab="{tab.fullTabId}">
-            <pre class="{empty: is_empty(tab.content)}">{ show_log(tab.content) }</pre>
+            <pre class="{empty: is_empty(tab.content)} {error-log: tab.is_error}">{ show_log(tab.content) }</pre>
         </div>
     </div>
     <!-- Fact sheet -->
@@ -185,11 +185,16 @@
                 .filter(t => !self.is_empty(t.content))
                 .map(t => ({
                     ...t,
+                    // stderr logs (keys ending in "err") are shown in red, so errors stand out from normal output
+                    is_error: /err$/.test(t.key),
                     fullTabId: `${prefix}sub_${self.submission.id}_${t.key}`
                 }))
 
             if (!self.activeLogTabId || !self.logTabs.find(t => t.fullTabId === self.activeLogTabId)) {
-                self.activeLogTabId = self.logTabs.length ? self.logTabs[0].fullTabId : null
+                // A failed submission opens on its first error log, where the reason is
+                const first_error = self.submission.status === 'Failed' && self.logTabs.find(t => t.is_error)
+                self.activeLogTabId = first_error ? first_error.fullTabId
+                    : (self.logTabs.length ? self.logTabs[0].fullTabId : null)
             }
         }
 
@@ -328,6 +333,16 @@
         .log textarea
             width 100%
             height 98%
+
+        // Error logs (stderr) in red, normal output stays white
+        .log pre.error-log
+            color #ff8a8a
+
+        .inverted.menu .item.error-log
+            color #ff6b6b !important
+
+        .inverted.menu .active.item.error-log
+            color #ff4d4d !important
 
     </style>
 </submission-modal>
