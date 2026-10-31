@@ -150,7 +150,8 @@ class LeaderboardEntriesSerializer(serializers.ModelSerializer):
             })
 
         submissions = submissions.order_by(*ordering, 'created_when')
-        return SubmissionLeaderBoardSerializer(submissions, many=True).data
+        # The context carries the request: organizers get every fact sheet answer, everybody else only the public ones
+        return SubmissionLeaderBoardSerializer(submissions, many=True, context=self.context).data
 
 
 class LeaderboardPhaseSerializer(serializers.ModelSerializer):
@@ -228,4 +229,5 @@ class LeaderboardPhaseSerializer(serializers.ModelSerializer):
             submissions = submissions.annotate(**kwargs)
 
         submissions = submissions.order_by(*ordering, 'created_when')
-        return SubmissionLeaderBoardSerializer(submissions, many=True).data
+        # The context carries the request: organizers get every fact sheet answer, everybody else only the public ones
+        return SubmissionLeaderBoardSerializer(submissions, many=True, context=self.context).data

@@ -45,6 +45,7 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 | 26 | 2026-10-27 | Compute worker | Docker images are no longer pulled before every submission | uncommitted |
 | 27 | 2026-10-27 | Task 9 phases | `sync_task9_phases` copies dates and limits from a master competition to the others | uncommitted |
 | 28 | 2026-10-28 | Failed submissions | Organizers see the technical details (bug fix); the reason of a failure is written into the logs | uncommitted |
+| 34 | 2026-10-29 | Fact sheet | Hidden answers no longer public; required checkboxes enforced; required answers checked before the upload | uncommitted |
 | 33 | 2026-10-29 | Submissions UI | Error logs shown in red; failed submissions open on the error log | uncommitted |
 | 32 | 2026-10-29 | Upload forms | Zip check (name, size, zip signature) on every upload form, not only the submission drop zone | uncommitted |
 | 31 | 2026-10-29 | Task 9 leaderboards | `sync_task9_leaderboards` copies leaderboard settings and columns from a master competition | uncommitted |
@@ -468,6 +469,29 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 - **Related, outside the repo:** the Task 9 scoring program (`D:\Projects\Semeval2027Framing\codabench_scoring_subtask1\score.py`, uploaded as
   `scorer.zip`) no longer prints or reports anything about the reference data, and computes micro/macro F1 itself (same formulas as
   the official scorer) because `codalab/codalab-legacy:py37` has a scikit-learn older than 0.22 (`zero_division` unsupported).
+
+### 34. Fact sheet: private answers, required checkboxes, check before the upload
+- **Files:** `src/apps/api/serializers/submission_leaderboard.py`, `src/apps/api/serializers/leaderboards.py`,
+  `src/apps/api/serializers/submissions.py`, `src/static/riot/competitions/detail/submission_upload.tag`
+- **Why:** review of the fact sheet before using it for Task 9.
+  1. The public leaderboard APIs (`/api/phases/<id>/get_leaderboard/`, no login needed, and `/api/leaderboards/<id>/`)
+     returned every answer of every submission, also those of questions not marked "Show On Leaderboard".
+  2. A required checkbox was never enforced (an unticked box passed), so a confirmation could not be made mandatory.
+  3. A missing required answer was only refused after the zip had been uploaded. Submissions sent without any answers
+     (API) skipped the required questions altogether.
+- **What:**
+  1. `SubmissionLeaderBoardSerializer.fact_sheet_answers` only keeps the "Show On Leaderboard" answers, except for the
+     organizers of the competition (the results export, which is organizer-only, still has every answer). The two
+     leaderboard serializers pass their context (the request) down for this.
+  2. `validate_fact_sheet_answers_for` replaces the old checks: same keys as the fact sheet, a required checkbox must be
+     ticked, a required text must not be blank, a selection must be one of its choices, clear messages using the question
+     title. It runs on every new submission and on every change of the answers (not on the worker's status updates).
+  3. The submission form checks the required answers when Submit is pressed, before uploading: the missing questions are
+     marked red with a short message and listed in a toast. Required checkboxes and selections now show the red `*` too.
+- **Unchanged:** the fact sheet logic itself (same questions on every submission, no pre-filled answers; the owner rejected
+  pre-filling because people would never change the answers).
+- **Needs:** front-end rebuild, `ASSET_VERSION` bump, recreate django.
+- **Verified:** read back only, not run.
 
 ---
 

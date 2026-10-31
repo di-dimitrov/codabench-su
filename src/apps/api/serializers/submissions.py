@@ -202,21 +202,51 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
 
         return sub
 
+    @staticmethod
+    def validate_fact_sheet_answers_for(fact_sheet, answers):
+        """
+        The answers must be given for exactly the questions of the competition's fact sheet, and every required
+        question must be answered. A required checkbox must be ticked (for confirmations such as "I followed the
+        rules"), a text answer must not be blank, and a selection must be one of its choices.
+        """
+        if not fact_sheet:
+            return
+        if not answers:
+            required = [question.get('title') or key for key, question in fact_sheet.items()
+                        if question.get('is_required') == 'true']
+            if required:
+                raise ValidationError(f'Please answer the fact sheet questions: {", ".join(required)}')
+            return
+        if not isinstance(answers, dict):
+            raise ValidationError('The fact sheet answers must be a JSON object')
+        if set(answers.keys()) != set(fact_sheet.keys()):
+            raise ValidationError("Fact Sheet keys do not match Answer keys")
+        for key, value in answers.items():
+            question = fact_sheet[key]
+            title = question.get('title') or key
+            required = question.get('is_required') == 'true'
+            if question.get('type') == 'checkbox':
+                if not isinstance(value, bool):
+                    raise ValidationError(f'{title}: the answer must be true or false')
+                if required and not value:
+                    raise ValidationError(f'{title}: this box must be ticked')
+                continue
+            if not isinstance(value, str):
+                raise ValidationError(f'{title}: the answer must be text')
+            choices = question.get('selection')
+            if question.get('type') == 'select' and choices and value not in choices:
+                raise ValidationError(f'{title}: "{value}" is not one of the choices ({", ".join(c for c in choices if c)})')
+            if required and not value.strip():
+                raise ValidationError(f'{title} requires an answer')
+
     def validate(self, attrs):
         data = super().validate(attrs)
 
-        if attrs.get('fact_sheet_answers'):
-            fact_sheet_answers = data['fact_sheet_answers']
-            fact_sheet = data['phase'].competition.fact_sheet
-            if set(fact_sheet_answers.keys()) != set(fact_sheet.keys()):
-                raise ValidationError("Fact Sheet keys do not match Answer keys")
-            for key, value in fact_sheet_answers.items():
-                if not fact_sheet[key] and not isinstance(value, str):
-                    raise ValidationError(f'{value} should be string not {type(value)}')
-                elif value not in fact_sheet[key]['selection'] and fact_sheet[key]['selection']:
-                    raise ValidationError(f'{key}: {value} is not a valid selection from {fact_sheet[key]}')
-                elif not value and fact_sheet[key]['is_required'] == 'true' and not isinstance(value, bool):
-                    raise ValidationError(f'{fact_sheet[key]["title"]}({key}) requires an answer')
+        # Checked on every new submission (answers missing altogether must not skip the required questions) and
+        # whenever the answers are changed; status updates from the compute worker do not touch them
+        if not self.instance or 'fact_sheet_answers' in attrs:
+            phase = data.get('phase') or self.instance.phase
+            self.validate_fact_sheet_answers_for(phase.competition.fact_sheet, attrs.get('fact_sheet_answers'))
 
         if attrs.get('tasks'):
             if not all(_ in attrs['phase'].tasks.all() for _ in attrs['tasks']):

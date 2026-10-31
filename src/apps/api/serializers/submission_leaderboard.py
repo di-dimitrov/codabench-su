@@ -29,6 +29,37 @@ class SubmissionLeaderBoardSerializer(serializers.ModelSerializer):
     created_when = serializers.DateTimeField()
     queue_id = serializers.SerializerMethodField()
     queue_name = serializers.SerializerMethodField()
+    fact_sheet_answers = serializers.SerializerMethodField()
+
+    def _fact_sheet_access(self, competition):
+        """
+        (show every answer?, keys of the questions shown on the leaderboard) for a competition, worked out once.
+
+        Leaderboards are public, so only the answers to "Show On Leaderboard" questions are sent, except to the
+        organizers of the competition (their results export needs every answer).
+        """
+        cache = getattr(self, '_fact_sheet_access_cache', None)
+        if cache is None:
+            cache = self._fact_sheet_access_cache = {}
+        if competition.id not in cache:
+            request = self.context.get('request')
+            user = getattr(request, 'user', None)
+            show_all = bool(user and user.is_authenticated and competition.user_has_admin_permission(user))
+            public_keys = {
+                key for key, question in (competition.fact_sheet or {}).items()
+                if isinstance(question, dict) and question.get('is_on_leaderboard') == 'true'
+            }
+            cache[competition.id] = (show_all, public_keys)
+        return cache[competition.id]
+
+    def get_fact_sheet_answers(self, obj):
+        answers = obj.fact_sheet_answers
+        if not isinstance(answers, dict) or not answers:
+            return answers
+        show_all, public_keys = self._fact_sheet_access(obj.phase.competition)
+        if show_all:
+            return answers
+        return {key: value for key, value in answers.items() if key in public_keys}
 
     def get_team_name(self, obj):
         # Users who signed up before team names existed (or through OIDC) have none

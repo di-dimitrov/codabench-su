@@ -7,26 +7,28 @@
             <div if="{_.get(selected_phase, 'status') === 'Previous'}" class="ui red message">This phase has ended and no longer accepts submissions!</div>
             <div if="{_.get(selected_phase, 'status') === 'Next'}" class="ui yellow message">This phase hasn't started yet!</div>
             <form class="ui form coda-animated {error: errors}" ref="form" enctype="multipart/form-data">
-                <div class="submission-form" ref="fact_sheet_form" if="{ opts.fact_sheet !== null}">
+                <div class="submission-form" ref="fact_sheet_form" if="{ opts.fact_sheet !== null}" onchange="{ fact_sheet_changed }">
                     <h2>Metadata or Fact Sheet</h2>
                     <div class="fact-sheet-scroll">
-                        <div class="submission-form-question" each="{ question in opts.fact_sheet }">
+                        <div class="submission-form-question { missing-answer: fact_sheet_missing[question.key] }" each="{ question in opts.fact_sheet }">
                             <span if="{ question.type === 'text' }">
-                                <label if="{question.is_required == 'true'}" class="required-answer" for="{ question.key }">{ question.title }:</label>
-                                <label if="{question.is_required == 'false'}" for="{ question.key }">{ question.title }:</label>
+                                <label class="{ required-answer: question.is_required == 'true' }" for="{ question.key }">{ question.title }:</label>
                                 <input type="text" name="{ question.key }">
                             </span>
                             <span if="{ question.type === 'checkbox' }">
-                                <label for="{ question.key }">{ question.title }:</label>
+                                <label class="{ required-answer: question.is_required == 'true' }" for="{ question.key }">{ question.title }:</label>
                                 <input type="hidden" name="{ question.key }" value="false">
                                 <input type="checkbox" name="{ question.key }" value="true">
                             </span>
                             <span if="{ question.type == 'select' }">
-                                <label for="{ question.key }">{ question.title }:</label>
+                                <label class="{ required-answer: question.is_required == 'true' }" for="{ question.key }">{ question.title }:</label>
                                 <select name="{ question.key }">
                                     <option each="{ selection_opt in question.selection }" value="{ selection_opt }">{ selection_opt }</option>
                                 </select>
                             </span>
+                            <div if="{ fact_sheet_missing[question.key] }" class="missing-answer-text">
+                                { question.type === 'checkbox' ? 'This box must be ticked.' : 'This question requires an answer.' }
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -194,6 +196,7 @@
         self.errors = {}
         self.has_file = false    // a valid .zip is waiting in the drop zone
         self.uploading = false   // the chosen file is being checked/uploaded, so the Submit button stays disabled
+        self.fact_sheet_missing = {}  // keys of the required fact sheet questions left unanswered at the last Submit
         self.lines = {}
         self.detailed_result_urls = {}
         self.selected_submission = {}
@@ -455,6 +458,12 @@
                 if (!self.has_file || self.uploading) {
                     return
                 }
+                // Required fact sheet answers are checked before anything is uploaded (the server checks them too)
+                let missing = self.missing_fact_sheet_answers()
+                if (missing.length) {
+                    toastr.error('Please answer the required fact sheet questions: ' + missing.join(', '))
+                    return
+                }
                 CODALAB.api.can_make_submissions(self.selected_phase.id)
                     .done(function (data) {
                         if (data.can) {
@@ -479,6 +488,36 @@
                 }
                 self.clear_form()
             }
+        }
+
+        // Titles of the required questions without an answer (a required checkbox must be ticked); they are marked red
+        self.missing_fact_sheet_answers = function () {
+            let answers = self.get_fact_sheet_answers() || {}
+            let missing = []
+            self.fact_sheet_missing = {}
+            _.forEach(self.opts.fact_sheet || {}, function (question) {
+                if (question.is_required !== 'true') {
+                    return
+                }
+                let value = answers[question.key]
+                let answered = question.type === 'checkbox'
+                    ? value === true
+                    : typeof value === 'string' && value.trim() !== ''
+                if (!answered) {
+                    self.fact_sheet_missing[question.key] = true
+                    missing.push(question.title || question.key)
+                }
+            })
+            self.update()
+            return missing
+        }
+
+        // Once a Submit was refused, the red marks follow the answers as they are given
+        self.fact_sheet_changed = function () {
+            if (!_.isEmpty(self.fact_sheet_missing)) {
+                self.missing_fact_sheet_answers()
+            }
+            return true
         }
 
         self.get_fact_sheet_answers = function () {
@@ -654,6 +693,17 @@
             label
                 font-size 16px
                 font-weight 600
+
+        .submission-form-question.missing-answer
+            label
+                color #db2828
+            input[type="text"], select
+                border-color #db2828
+                background #fff6f6
+
+        .missing-answer-text
+            margin-top .25em
+            color #db2828
 
         #submission-output
 
