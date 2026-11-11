@@ -347,6 +347,40 @@ def create_detailed_output_file(detail_name, submission):
     return make_url_sassy(new_details.data_file.name, permission="w")
 
 
+def _task_setup_problems(tasks):
+    """What is missing from the tasks for a submission to be evaluated, as sentences for the organizers."""
+    if not tasks:
+        return ["the phase has no task"]
+    problems = []
+    for task in tasks:
+        missing = []
+        if not task.scoring_program_id:
+            missing.append("scoring program")
+        if not task.reference_data_id:
+            missing.append("reference data")
+        if missing:
+            problems.append(f'task "{task.name}" (id {task.pk}) has no {" and no ".join(missing)}')
+    return problems
+
+
+def _fail_for_task_setup(submission, problems):
+    """
+    Fail the submission before anything runs. Participants get the generic "setup" message (FAILURE_SUMMARIES);
+    organizers see what is missing in the Technical details of the submission, and it is logged by the site worker.
+    """
+    details = (
+        "TASK SETUP PROBLEM, the submission was not run: " + "; ".join(problems) + ". "
+        "Attach what is missing to the task (competition editor, or the Django admin), then resubmit this submission."
+    )
+    logger.error(f"Submission {submission.pk} (competition {submission.phase.competition_id}): {details}")
+    submission.status = Submission.FAILED
+    submission.status_details = details
+    submission.failure_type = Submission.SETUP_FAILURE
+    submission.save(update_fields=["status", "status_details", "failure_type"])
+    if submission.parent:
+        submission.parent.check_child_submission_statuses()
+
+
 def run_submission(submission_pk, tasks=None, is_scoring=False, group_ids=None):
     task_ids = [t.id for t in tasks] if tasks else None
     return _run_submission.apply_async((submission_pk, task_ids, is_scoring, group_ids))
@@ -424,6 +458,13 @@ def _run_submission(submission_pk, task_pks=None, is_scoring=False, group_ids=No
         tasks = submission.phase.tasks.filter(pk__in=task_pks)
 
     tasks = list(tasks.order_by("pk"))
+
+    # A task without scoring program or reference data cannot evaluate anything. Without this check the submission
+    # ran its first step and then stayed in "Scoring" for ever, with no message anywhere.
+    setup_problems = _task_setup_problems(tasks)
+    if setup_problems:
+        _fail_for_task_setup(submission, setup_problems)
+        return
 
     if submission.parent is None and not is_scoring:
         group_queues = _get_user_group_queues(

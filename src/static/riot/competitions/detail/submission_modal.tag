@@ -21,7 +21,7 @@
                 <div if="{opts.admin && submission.status_details}">
                     <h4 class="ui header">
                         Technical details
-                        <div class="sub header">Only organizers can see this. It is what the compute worker reported.</div>
+                        <div class="sub header">Only organizers can see this. It is what the platform or the compute worker reported.</div>
                     </h4>
                     <pre class="technical-details">{ submission.status_details }</pre>
                     <button type="button" class="ui mini basic button" onclick="{ copy_details }">
@@ -132,6 +132,7 @@
             program: 'red',
             scoring: 'purple',
             time_limit: 'yellow',
+            setup: 'blue',
         }[self.submission.failure_type] || 'red')
 
         self.failure_icon = () => ({
@@ -140,6 +141,7 @@
             program: 'bug',
             scoring: 'calculator',
             time_limit: 'clock outline',
+            setup: 'wrench',
         }[self.submission.failure_type] || 'exclamation circle')
 
         self.no_logs_message = () => {
@@ -149,6 +151,9 @@
             if (self.submission.failure_type === 'platform') {
                 return "No logs were produced: the problem happened on the platform before your program could run or " +
                     "finish, so there was nothing to record."
+            }
+            if (self.submission.failure_type === 'setup') {
+                return "No logs were produced: the submission was not run, because the task is not ready yet."
             }
             return "No logs were produced for this submission."
         }

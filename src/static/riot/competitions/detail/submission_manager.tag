@@ -568,6 +568,7 @@
                 program: 'red',
                 scoring: 'purple',
                 time_limit: 'yellow',
+                setup: 'blue',
             }[submission.failure_type] || 'grey'
         }
 

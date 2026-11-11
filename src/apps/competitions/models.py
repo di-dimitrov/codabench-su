@@ -464,6 +464,7 @@ class Submission(models.Model):
     PROGRAM_FAILURE = "program"        # a program failed while running the submission
     SCORING_FAILURE = "scoring"        # the scoring program could not evaluate the submission
     TIME_LIMIT_FAILURE = "time_limit"  # the execution time limit of the phase was exceeded
+    SETUP_FAILURE = "setup"            # the task is not set up (no scoring program / reference data): organizers' side
 
     FAILURE_TYPE_CHOICES = (
         (PLATFORM_FAILURE, "Platform error"),
@@ -471,6 +472,7 @@ class Submission(models.Model):
         (PROGRAM_FAILURE, "Program error"),
         (SCORING_FAILURE, "Scoring error"),
         (TIME_LIMIT_FAILURE, "Time limit exceeded"),
+        (SETUP_FAILURE, "Task setup issue"),
     )
 
     # What a participant is told about each failure type: (title, message). Technical details (tracebacks, hostnames)
@@ -498,6 +500,12 @@ class Submission(models.Model):
         TIME_LIMIT_FAILURE: (
             "Time limit exceeded",
             "Your submission ran longer than the execution time limit of this phase.",
+        ),
+        SETUP_FAILURE: (
+            "Evaluation temporarily unavailable",
+            "Your submission could not be evaluated because this task is still being set up on the platform. "
+            "This is not caused by your submission. Please contact the organizers, and submit again once they "
+            "confirm it is fixed. Failed submissions do not count towards your submission limit.",
         ),
     }
     DEFAULT_FAILURE_SUMMARY = ("Failed", "The submission failed. Check the logs for details.")

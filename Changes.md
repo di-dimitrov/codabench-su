@@ -45,6 +45,7 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 | 26 | 2026-10-27 | Compute worker | Docker images are no longer pulled before every submission | uncommitted |
 | 27 | 2026-10-27 | Task 9 phases | `sync_task9_phases` copies dates and limits from a master competition to the others | uncommitted |
 | 28 | 2026-10-28 | Failed submissions | Organizers see the technical details (bug fix); the reason of a failure is written into the logs | uncommitted |
+| 36 | 2026-11-11 | Failed submissions | A task without scoring program or reference data fails the submission at once ("setup" failure) instead of leaving it in Scoring | uncommitted |
 | 35 | 2026-11-11 | Django admin | Datas list can be filtered by type and competition | uncommitted |
 | 34 | 2026-10-29 | Fact sheet | Hidden answers no longer public; required checkboxes enforced; required answers checked before the upload | uncommitted |
 | 33 | 2026-10-29 | Submissions UI | Error logs shown in red; failed submissions open on the error log | uncommitted |
@@ -499,6 +500,25 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 - **Why:** the Datas list mixes participant submissions with reference data, scoring programs, bundles, etc.
 - **What:** `type` and `competition` added to `list_filter` (sidebar filters next to the existing public/verified ones).
 - **Needs:** recreate django (Python change only, no front-end rebuild).
+- **Verified:** read back only, not run.
+
+### 36. Task setup problems fail the submission with a clear message
+- **Files:** `src/apps/competitions/tasks.py`, `src/apps/competitions/models.py`,
+  `src/apps/competitions/migrations/0067_alter_submission_failure_type.py`,
+  `src/static/riot/competitions/detail/submission_modal.tag`, `src/static/riot/competitions/detail/submission_manager.tag`
+- **Why:** submissions 34/35 (competition 12, subtask 2b) stayed in "Scoring" for ever because the task had no reference
+  data: no error anywhere, and the stuck-submission cleanup does not catch them.
+- **What:**
+  - `_run_submission` checks the tasks before anything is sent to the compute worker (both steps). A task without a
+    scoring program or reference data (or a phase without task) fails the submission with the new failure type `setup`.
+  - Participants see "Evaluation temporarily unavailable": the task is still being set up, not caused by their
+    submission, contact the organizers and submit again later; failed submissions do not use their limit.
+  - Organizers see in the submission's Technical details (and the site worker logs, ERROR level):
+    `TASK SETUP PROBLEM, the submission was not run: task "..." (id N) has no reference data. Attach what is missing ...`.
+  - Blue label and wrench icon for this failure type in the submissions list and the submission window.
+  - Migration 0067 only changes the choices of `failure_type` (no data change).
+- **Needs:** migrations (run on django start), restart `site_worker` (it runs the check), front-end rebuild,
+  `ASSET_VERSION` bump.
 - **Verified:** read back only, not run.
 
 ---
