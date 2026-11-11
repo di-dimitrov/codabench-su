@@ -45,6 +45,7 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 | 26 | 2026-10-27 | Compute worker | Docker images are no longer pulled before every submission | uncommitted |
 | 27 | 2026-10-27 | Task 9 phases | `sync_task9_phases` copies dates and limits from a master competition to the others | uncommitted |
 | 28 | 2026-10-28 | Failed submissions | Organizers see the technical details (bug fix); the reason of a failure is written into the logs | uncommitted |
+| 35 | 2026-11-11 | Django admin | Datas list can be filtered by type and competition | uncommitted |
 | 34 | 2026-10-29 | Fact sheet | Hidden answers no longer public; required checkboxes enforced; required answers checked before the upload | uncommitted |
 | 33 | 2026-10-29 | Submissions UI | Error logs shown in red; failed submissions open on the error log | uncommitted |
 | 32 | 2026-10-29 | Upload forms | Zip check (name, size, zip signature) on every upload form, not only the submission drop zone | uncommitted |
@@ -491,6 +492,13 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 - **Unchanged:** the fact sheet logic itself (same questions on every submission, no pre-filled answers; the owner rejected
   pre-filling because people would never change the answers).
 - **Needs:** front-end rebuild, `ASSET_VERSION` bump, recreate django.
+- **Verified:** read back only, not run.
+
+### 35. Django admin: filter the Datas list by type and competition
+- **Files:** `src/apps/datasets/admin.py`
+- **Why:** the Datas list mixes participant submissions with reference data, scoring programs, bundles, etc.
+- **What:** `type` and `competition` added to `list_filter` (sidebar filters next to the existing public/verified ones).
+- **Needs:** recreate django (Python change only, no front-end rebuild).
 - **Verified:** read back only, not run.
 
 ---

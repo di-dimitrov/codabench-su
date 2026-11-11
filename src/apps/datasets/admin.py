@@ -35,7 +35,8 @@ class DataExpansion(admin.ModelAdmin):
         "file_name",
         "file_size",
     ]
-    list_filter = ["is_public", "is_verified"]
+    # By type (submission, reference data, scoring program, ...) and by competition
+    list_filter = ["type", "competition", "is_public", "is_verified"]
 
     @admin.display(description="Description", ordering="description")
     def description_limited(self, obj):
