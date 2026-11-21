@@ -45,6 +45,8 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 | 26 | 2026-10-27 | Compute worker | Docker images are no longer pulled before every submission | uncommitted |
 | 27 | 2026-10-27 | Task 9 phases | `sync_task9_phases` copies dates and limits from a master competition to the others | uncommitted |
 | 28 | 2026-10-28 | Failed submissions | Organizers see the technical details (bug fix); the reason of a failure is written into the logs | uncommitted |
+| 38 | 2026-11-21 | Web server | Gunicorn workers are replaced every ~2000 requests (safety net against leaks) | uncommitted |
+| 37 | 2026-11-21 | Live updates | Redis connection leak fixed: approve/deny and the participants list failed with "could not translate host name db" | uncommitted |
 | 36 | 2026-11-11 | Failed submissions | A task without scoring program or reference data fails the submission at once ("setup" failure) instead of leaving it in Scoring | uncommitted |
 | 35 | 2026-11-11 | Django admin | Datas list can be filtered by type and competition | uncommitted |
 | 34 | 2026-10-29 | Fact sheet | Hidden answers no longer public; required checkboxes enforced; required answers checked before the upload | uncommitted |
@@ -521,6 +523,36 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
   `ASSET_VERSION` bump.
 - **Verified:** read back only, not run.
 
+### 37. Redis connection leak in live submission updates (approve/deny and participants list failing)
+- **Files:** `src/apps/api/serializers/submissions.py`
+- **Why:** approving/denying participants failed consistently and the participants list sometimes did not load. The django
+  log showed `OperationalError: could not translate host name "db" to address: System error` on random requests (120 in 48 h)
+  and 6,832 "Too many open files" errors. Diagnosis on the server (2026-11-21): one gunicorn worker had 1,021 of its 1,024
+  allowed open files, 763 of them sockets; 466 were established connections to Redis (port 6379), plus 251 abandoned event
+  loops. Redis reported 470 connected clients. When a worker is out of file descriptors it cannot even resolve `db`, so any
+  request needing the database fails; which worker answers decides whether a click works ("sometimes").
+- **Root cause:** `SubmissionSerializer.update` (called by the compute worker on every status update) sent the live update with
+  `asyncio.get_event_loop()`, which raises in the server's request threads, so it fell back to `asyncio.new_event_loop()` every
+  time and never closed the loop. channels_redis keeps one connection pool per event loop, so every status update leaked one
+  Redis connection and one event loop until the worker hit its file limit (started 2026-11-11, full after ~10 days).
+- **What:** replaced with `async_to_sync(channel_layer.group_send)(...)` (the standard Channels call: runs on the server's
+  existing event loop and its single connection pool). Same message, same group. Removed the now unused `import asyncio`.
+- **Needs:** copy the file to the server and recreate django (`docker compose up -d django`); the repo is mounted, no rebuild.
+- **Related, done by the owner:** `ulimits: nofile 65536` added to the `django` service in `docker-compose.yml` (more headroom,
+  not a fix on its own).
+- **Verified:** compiles, diff limited to this block, no test references this code. Not run against a real instance. After deploy,
+  `docker compose exec redis redis-cli info clients` should stay low instead of growing past 470.
+
+### 38. Gunicorn worker recycling
+- **Files:** `src/gunicorn_run.py`
+- **Why:** safety net so that any future leak in a worker (connections, open files) cannot build up for days again.
+- **What:** `max_requests` 2000 and `max_requests_jitter` 200 in the gunicorn options, overridable with
+  `GUNICORN_MAX_REQUESTS` / `GUNICORN_MAX_REQUESTS_JITTER`. Each worker is replaced after ~2000 requests; the jitter keeps the
+  two workers from restarting together, so the site stays up. Live log connections on a retiring worker reconnect.
+- **Needs:** same deploy as 37 (watchmedo also restarts gunicorn by itself when the file changes).
+- **Verified:** compiles; not run. After deploy, `docker compose logs django | grep -iE "maximum request limit|booting worker"`
+  shows the workers being replaced.
+
 ---
 
 ## 3. Things that were looked at and deliberately NOT changed
@@ -530,6 +562,11 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 - Denied participants keep their existing submissions on the leaderboard.
 - Denial fan-out also applies to users who organize one of the 12 competitions (accepted: one-off event).
 - Public participant counters include denied rows created by the fan-out.
+- `competitions/tasks.py` `send_submission_message` uses the same `run_until_complete` pattern as entry 37, but it runs in the
+  Celery site worker, which reuses one event loop, so it does not leak. Left as is.
+- `/submission_output/` returns "Not Found" constantly: the departmental Apache in front of Caddy does not pass WebSocket
+  connections, so live status and live logs never reach the browser (participants must refresh). Outside the repository;
+  needs `upgrade=websocket` on the Apache `ProxyPass` (Apache 2.4.47+), to be asked to the department admins.
 
 ## 4. Deploy checklist (as agreed; also stored in Claude's memory)
 1. Commit the changes on `registration-changes-after-refresh`.
@@ -546,6 +583,8 @@ Entry format: **what** changed, **files**, **why / who decided**, **status**, **
 5. **Run `sync_task9_participants --dry-run`, then for real, once right after deploy.**
 6. Check `TASK9_COMPETITION_IDS` matches the real competition ids on the server.
 7. Users without a team name show `N/A` on the leaderboard; tell them to fill it in on their profile.
+8. Entries 37/38 (Redis leak): copy `src/apps/api/serializers/submissions.py`, `src/gunicorn_run.py` and `docker-compose.yml`
+   (ulimits) to the server, run `docker compose up -d django`, then check `redis-cli info clients` stays low over the next hours.
 
 ## 5. Outside the repository (no effect on the code)
 - Claude's memory files (`~/.claude/projects/D--Codabench-codabench-su/memory/`): deploy checklist reminder, Task 9
