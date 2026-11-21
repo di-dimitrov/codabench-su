@@ -68,6 +68,10 @@ if __name__ == "__main__":
     options = {
         "bind": [':8000', ':80'],
         "workers": WORKERS,
+        # Replace each worker after ~2000 requests (jitter keeps the two workers from restarting together),
+        # so anything a worker leaks (connections, open files) is released regularly.
+        "max_requests": int(os.environ.get("GUNICORN_MAX_REQUESTS", "2000")),
+        "max_requests_jitter": int(os.environ.get("GUNICORN_MAX_REQUESTS_JITTER", "200")),
         "accesslog": "-",
         "errorlog": "-",
         "worker_class": "uvicorn_worker.UvicornWorker",

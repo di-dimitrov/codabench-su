@@ -1,4 +1,3 @@
-import asyncio
 from os.path import basename
 
 from django.core.cache import cache
@@ -296,22 +295,20 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
         # Update status if it is there in validated data
         if "status" in validated_data:
             # Received a status update, let the frontend know
+            from asgiref.sync import async_to_sync
             from channels.layers import get_channel_layer
             channel_layer = get_channel_layer()
 
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-
-            loop.run_until_complete(channel_layer.group_send(f"submission_listening_{submission.owner.pk}", {
+            # async_to_sync runs this on the server's existing event loop. The old code created a new event
+            # loop on every status update and never closed it, leaking one Redis connection each time.
+            async_to_sync(channel_layer.group_send)(f"submission_listening_{submission.owner.pk}", {
                 'type': 'submission.message',
                 'text': {
                     "kind": "status_update",
                     "status": validated_data["status"],
                 },
                 'submission_id': submission.id,
-            }))
+            })
 
         if validated_data.get('status') == Submission.RUNNING and self.instance.parent is not None and self.instance.parent.status is not Submission.RUNNING:
             self.instance.parent.status = Submission.RUNNING
